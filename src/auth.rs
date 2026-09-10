@@ -24,7 +24,7 @@ pub fn resolve_from(
     {
         return Ok(token);
     }
-    gh_lookup().ok_or_else(|| anyhow!("No GitHub token: set GITHUB_TOKEN or run `gh auth login`"))
+    gh_lookup().ok_or_else(|| anyhow!("No GitHub token: set GITHUB_TOKEN or run gh auth login"))
 }
 
 fn gh_auth_token() -> Option<String> {
@@ -59,7 +59,7 @@ mod tests {
         let err = resolve_from(None, || None).unwrap_err();
         assert_eq!(
             err.to_string(),
-            "No GitHub token: set GITHUB_TOKEN or run `gh auth login`"
+            "No GitHub token: set GITHUB_TOKEN or run gh auth login"
         );
     }
 }

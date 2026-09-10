@@ -55,6 +55,7 @@ The bundle sets `LSUIElement` so the app has no Dock icon.
 | `src/icons.rs` | Status dots and the menu bar glyph, drawn at runtime. |
 | `src/avatars.rs` | Avatar download, circular mask, avatar strips. |
 | `src/menu.rs` | Builds the `NSMenu` from a snapshot. |
+| `src/events.rs` | Events passed from the worker to the main thread. |
 | `src/worker.rs` | Background refresh thread. |
 | `src/main.rs` | Event loop wiring. |
 | `docs/superpowers/specs/` | Design document. |

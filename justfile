@@ -15,3 +15,7 @@ run:
 # Build prtoolbar.app into target/release/bundle (needs `cargo install cargo-bundle`).
 bundle:
     cargo bundle --release
+
+# Check licences and advisories (needs `cargo install cargo-deny`).
+deny:
+    cargo deny check

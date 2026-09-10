@@ -62,7 +62,7 @@ pub fn fill_circle(img: &mut RgbaImage, cx: f32, cy: f32, radius: f32, rgb: [u8;
         let dy = y as f32 + 0.5 - cy;
         let coverage = (radius + 0.5 - (dx * dx + dy * dy).sqrt()).clamp(0.0, 1.0);
         if coverage > 0.0 {
-            blend(pixel, rgb, coverage);
+            blend_same_colour(pixel, rgb, coverage);
         }
     }
 }
@@ -77,7 +77,7 @@ fn ring(img: &mut RgbaImage, cx: f32, cy: f32, radius: f32, stroke: f32) {
         let d = (dx * dx + dy * dy).sqrt();
         let coverage = (outer + 0.5 - d).clamp(0.0, 1.0) * (d - inner + 0.5).clamp(0.0, 1.0);
         if coverage > 0.0 {
-            blend(pixel, BLACK, coverage);
+            blend_same_colour(pixel, BLACK, coverage);
         }
     }
 }
@@ -90,8 +90,11 @@ fn fill_rect(img: &mut RgbaImage, x0: u32, y0: u32, w: u32, h: u32, rgb: [u8; 3]
     }
 }
 
-/// Alpha-blend `rgb` at `coverage` over an existing pixel.
-fn blend(pixel: &mut Rgba<u8>, rgb: [u8; 3], coverage: f32) {
+/// Alpha-blend `rgb` at `coverage` over an existing pixel. Only supports one
+/// colour per canvas: repeated calls with different colours on the same
+/// pixel do not composite correctly, since alpha is maxed rather than
+/// accumulated.
+fn blend_same_colour(pixel: &mut Rgba<u8>, rgb: [u8; 3], coverage: f32) {
     let alpha = (coverage * 255.0).round() as u8;
     if pixel.0[3] == 0 || alpha == 0xFF {
         *pixel = Rgba([rgb[0], rgb[1], rgb[2], alpha]);
@@ -159,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn conversions_keep_dimensions() {
+    fn conversions_do_not_panic() {
         let dot = status_dot(Status::Waiting);
         let _tray = tray_icon(&dot);
         let _menu = menu_icon(&dot);

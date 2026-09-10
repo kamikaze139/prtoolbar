@@ -86,7 +86,7 @@ impl App {
                 self.rebuild();
             }
             AppEvent::Failed(message) => {
-                self.snapshot.error = Some(message);
+                self.snapshot.error = Some(menu::truncate(&message, 100));
                 self.rebuild();
             }
             AppEvent::Avatars(fresh) => {
@@ -105,7 +105,9 @@ impl App {
                 }
             }
             Some(Action::Refresh) => {
-                let _ = self.worker.send(Command::Refresh);
+                if self.worker.send(Command::Refresh).is_err() {
+                    log::warn!("refresh worker is gone");
+                }
             }
             None => log::debug!("unhandled menu id {id:?}"),
         }
