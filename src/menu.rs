@@ -47,8 +47,8 @@ pub fn build_menu(snapshot: &Snapshot, avatars: &HashMap<String, RgbaImage>) -> 
         menu.append(&MenuItem::new("No open pull requests 🎉", false, None))?;
     }
 
-    for (index, pr) in snapshot.prs.iter().enumerate() {
-        let id = MenuId::new(format!("pr-{index}"));
+    for pr in &snapshot.prs {
+        let id = MenuId::new(&pr.url);
         let dot = menu_icon(&status_dot(Status::derive(pr)));
         menu.append(&IconMenuItem::with_id(
             id.clone(),
