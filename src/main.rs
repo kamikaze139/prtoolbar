@@ -8,10 +8,12 @@
 
 mod auth;
 mod avatars;
+mod events;
 mod github;
 mod icons;
 mod menu;
 mod model;
+mod worker;
 
 use std::thread;
 use std::time::Duration;
