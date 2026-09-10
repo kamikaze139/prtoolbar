@@ -1393,7 +1393,7 @@ pub enum Action {
 }
 
 /// A menu plus the lookup table from item id to action.
-#[derive(Debug)]
+/// (`Menu` does not implement `Debug`, so neither does this.)
 pub struct BuiltMenu {
     pub menu: Menu,
     pub actions: HashMap<MenuId, Action>,
@@ -1454,7 +1454,9 @@ pub fn tray_title(snapshot: &Snapshot) -> Option<String> {
     if snapshot.error.is_some() {
         return Some("!".to_owned());
     }
-    snapshot.updated_at.as_ref()?;
+    if snapshot.updated_at.is_none() {
+        return Some("…".to_owned());
+    }
     match snapshot.prs.len() {
         0 => None,
         n => Some(n.to_string()),
