@@ -4,6 +4,10 @@
 //! proves the threading model (worker thread -> event loop proxy). See
 //! `docs/superpowers/plans/` for the implementation plan.
 
+#![allow(dead_code)] // Removed in Task 8 once every module is wired up.
+
+mod model;
+
 use std::thread;
 use std::time::Duration;
 
