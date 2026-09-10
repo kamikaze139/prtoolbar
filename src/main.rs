@@ -1,10 +1,7 @@
 //! prtoolbar — a macOS menu bar app that lists your open GitHub pull requests.
 //!
-//! This is the initial skeleton: it shows a tray icon with a Quit item and
-//! proves the threading model (worker thread -> event loop proxy). See
-//! `docs/superpowers/plans/` for the implementation plan.
-
-#![allow(dead_code)] // Removed in Task 8 once every module is wired up.
+//! The main thread owns the event loop, the status item and its menu. A
+//! worker thread (see `worker.rs`) fetches data and posts [`AppEvent`]s here.
 
 mod auth;
 mod avatars;
@@ -15,24 +12,21 @@ mod menu;
 mod model;
 mod worker;
 
-use std::thread;
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::mpsc::Sender;
 
 use anyhow::Result;
+use image::RgbaImage;
 use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
-use tray_icon::menu::{Menu, MenuEvent, PredefinedMenuItem};
-use tray_icon::{Icon, TrayIconBuilder};
+use tray_icon::menu::{MenuEvent, MenuId};
+use tray_icon::{TrayIcon, TrayIconBuilder};
 
-/// Events delivered to the main thread.
-#[derive(Debug)]
-enum AppEvent {
-    /// A menu item was activated.
-    Menu(MenuEvent),
-    /// The worker thread ticked.
-    Tick,
-}
+use crate::events::AppEvent;
+use crate::menu::Action;
+use crate::model::Snapshot;
+use crate::worker::Command;
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
@@ -45,42 +39,91 @@ fn main() -> Result<()> {
         let _ = proxy.send_event(AppEvent::Menu(event));
     }));
 
-    let proxy = event_loop.create_proxy();
-    thread::spawn(move || {
-        loop {
-            thread::sleep(Duration::from_secs(60));
-            if proxy.send_event(AppEvent::Tick).is_err() {
-                break;
-            }
-        }
-    });
-
-    let menu = Menu::new();
-    let quit = PredefinedMenuItem::quit(Some("Quit prtoolbar"));
-    menu.append(&quit)?;
+    let interval =
+        worker::interval_from_env(std::env::var("PRTOOLBAR_INTERVAL_SECS").ok().as_deref());
+    let worker = worker::spawn(event_loop.create_proxy(), interval);
 
     let tray = TrayIconBuilder::new()
-        .with_icon(placeholder_icon())
+        .with_icon(icons::tray_icon(&icons::menubar_glyph()))
         .with_icon_as_template(true)
-        .with_title("…")
-        .with_menu(Box::new(menu))
+        .with_tooltip("prtoolbar")
         .build()?;
+
+    let mut app = App {
+        tray,
+        worker,
+        snapshot: Snapshot::default(),
+        avatars: HashMap::new(),
+        actions: HashMap::new(),
+    };
+    app.rebuild();
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
-        // Keep the tray alive for the lifetime of the loop.
-        let _ = &tray;
-        match event {
-            Event::UserEvent(AppEvent::Menu(menu_event)) => log::debug!("menu: {menu_event:?}"),
-            Event::UserEvent(AppEvent::Tick) => log::debug!("tick"),
-            _ => {}
+        if let Event::UserEvent(event) = event {
+            app.handle(event);
         }
     });
 }
 
-/// A solid 32x32 square used until real icons exist.
-fn placeholder_icon() -> Icon {
-    const SIZE: u32 = 32;
-    let rgba = [0, 0, 0, 255].repeat((SIZE * SIZE) as usize);
-    Icon::from_rgba(rgba, SIZE, SIZE).expect("placeholder icon dimensions are valid")
+/// All main-thread state.
+struct App {
+    tray: TrayIcon,
+    worker: Sender<Command>,
+    snapshot: Snapshot,
+    avatars: HashMap<String, RgbaImage>,
+    actions: HashMap<MenuId, Action>,
+}
+
+impl App {
+    fn handle(&mut self, event: AppEvent) {
+        match event {
+            AppEvent::Loaded(prs) => {
+                self.snapshot.prs = prs;
+                self.snapshot.error = None;
+                self.snapshot.updated_at = Some(now_hhmm());
+                self.rebuild();
+            }
+            AppEvent::Failed(message) => {
+                self.snapshot.error = Some(message);
+                self.rebuild();
+            }
+            AppEvent::Avatars(fresh) => {
+                self.avatars.extend(fresh);
+                self.rebuild();
+            }
+            AppEvent::Menu(menu_event) => self.activate(&menu_event.id),
+        }
+    }
+
+    fn activate(&self, id: &MenuId) {
+        match self.actions.get(id) {
+            Some(Action::OpenUrl(url)) => {
+                if let Err(err) = open::that_detached(url) {
+                    log::warn!("open {url}: {err}");
+                }
+            }
+            Some(Action::Refresh) => {
+                let _ = self.worker.send(Command::Refresh);
+            }
+            None => log::debug!("unhandled menu id {id:?}"),
+        }
+    }
+
+    /// Rebuild the menu and title from the current snapshot.
+    fn rebuild(&mut self) {
+        match menu::build_menu(&self.snapshot, &self.avatars) {
+            Ok(built) => {
+                self.tray.set_menu(Some(Box::new(built.menu)));
+                self.actions = built.actions;
+            }
+            Err(err) => log::error!("building menu: {err:#}"),
+        }
+        self.tray.set_title(menu::tray_title(&self.snapshot));
+    }
+}
+
+/// Local wall-clock time as `HH:MM`.
+fn now_hhmm() -> String {
+    jiff::Zoned::now().strftime("%H:%M").to_string()
 }
