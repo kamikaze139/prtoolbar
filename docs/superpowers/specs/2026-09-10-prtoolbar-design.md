@@ -101,8 +101,9 @@ query {
 ```
 
 Endpoint `https://api.github.com/graphql`, header `Authorization: bearer <token>`,
-`User-Agent: prtoolbar/<version>`. 50 PRs is the cap; more than that is not a
-menu problem this tool should solve.
+`User-Agent: prtoolbar/<version>`. 50 PRs is the menu cap. The tray count
+stays truthful: when `issueCount` exceeds the listed PRs the title shows
+`50+` and the menu ends with `Showing 50 of N`.
 
 ### Domain model (`model.rs`)
 
@@ -168,7 +169,9 @@ Quit prtoolbar                             ⌘Q
 - Menubar: template icon (monochrome pull-request glyph) with `set_title`
   showing the count, e.g. `⑂ 3`. Zero PRs → no title. While the first load is
   in flight → title `…`. On error → title `!` and an extra disabled item
-  `⚠ {short error}` at the top of the menu, previous PR list preserved.
+  `⚠ {short error}` at the top of the menu, previous PR list preserved. Past
+  the 50-PR cap the title shows `50+` and the menu ends with
+  `Showing 50 of N`.
 - Empty state: single disabled item `No open pull requests 🎉`.
 
 ## Behaviour

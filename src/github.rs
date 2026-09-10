@@ -12,6 +12,7 @@ const ENDPOINT: &str = "https://api.github.com/graphql";
 const QUERY: &str = r#"
 query {
   search(query: "is:pr is:open author:@me archived:false sort:updated-desc", type: ISSUE, first: 50) {
+    issueCount
     nodes {
       ... on PullRequest {
         number title url isDraft
@@ -32,19 +33,15 @@ query {
 ///
 /// The agent must be configured with `http_status_as_error(false)` so that
 /// non-2xx responses reach the status mapping below.
-pub fn fetch_open_prs(agent: &Agent, token: &str) -> Result<Vec<PullRequest>> {
+pub fn fetch_open_prs(agent: &Agent, token: &str) -> Result<(Vec<PullRequest>, u64)> {
     let mut response = agent
         .post(ENDPOINT)
         .header("Authorization", format!("bearer {token}"))
         .send_json(serde_json::json!({ "query": QUERY }))
         .context("GitHub request failed")?;
 
-    let status = response.status().as_u16();
-    match status {
-        200 => {}
-        401 => bail!("GitHub rejected the token (401)"),
-        403 | 429 => bail!("GitHub rate limited (HTTP {status})"),
-        other => bail!("GitHub HTTP {other}"),
+    if let Some(err) = status_error(response.status().as_u16()) {
+        return Err(err);
     }
 
     let body = response
@@ -54,8 +51,18 @@ pub fn fetch_open_prs(agent: &Agent, token: &str) -> Result<Vec<PullRequest>> {
     parse_response(&body)
 }
 
-/// Turn a raw GraphQL response body into pull requests.
-pub fn parse_response(body: &str) -> Result<Vec<PullRequest>> {
+/// Map an HTTP status code to the error shown in the menu, or `None` for 200.
+fn status_error(status: u16) -> Option<anyhow::Error> {
+    match status {
+        200 => None,
+        401 => Some(anyhow!("GitHub rejected the token (401)")),
+        403 | 429 => Some(anyhow!("GitHub rate limited (HTTP {status})")),
+        other => Some(anyhow!("GitHub HTTP {other}")),
+    }
+}
+
+/// Turn a raw GraphQL response body into pull requests and the total count.
+pub fn parse_response(body: &str) -> Result<(Vec<PullRequest>, u64)> {
     let parsed: GraphQlResponse =
         serde_json::from_str(body).context("GitHub returned unexpected JSON")?;
 
@@ -67,12 +74,20 @@ pub fn parse_response(body: &str) -> Result<Vec<PullRequest>> {
     let data = parsed
         .data
         .ok_or_else(|| anyhow!("GitHub returned no data"))?;
-    Ok(data
+    let total = data.search.issue_count;
+    let prs = data
         .search
         .nodes
         .into_iter()
-        .map(PullRequest::from)
-        .collect())
+        .filter_map(|node| match serde_json::from_value::<PrNode>(node) {
+            Ok(node) => Some(PullRequest::from(node)),
+            Err(err) => {
+                log::warn!("skipping search node: {err}");
+                None
+            }
+        })
+        .collect();
+    Ok((prs, total))
 }
 
 // --- DTOs -------------------------------------------------------------------
@@ -90,7 +105,15 @@ struct GraphQlError {
 
 #[derive(Debug, Deserialize)]
 struct Data {
-    search: Nodes<PrNode>,
+    search: SearchResult,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchResult {
+    #[serde(default)]
+    issue_count: u64,
+    nodes: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -242,8 +265,9 @@ mod tests {
 
     #[test]
     fn parses_fixture_into_pull_requests() {
-        let prs = parse_response(FIXTURE).expect("fixture parses");
+        let (prs, total) = parse_response(FIXTURE).expect("fixture parses");
         assert_eq!(prs.len(), 2);
+        assert_eq!(total, 2);
 
         let first = &prs[0];
         assert_eq!(first.repo, "acme/widgets");
@@ -289,11 +313,42 @@ mod tests {
     }
 
     #[test]
+    fn a_malformed_node_is_skipped_not_fatal() {
+        let (prs, _) = parse_response(r#"{"data":{"search":{"nodes":[{}]}}}"#)
+            .expect("malformed node is skipped, not an error");
+        assert_eq!(prs, vec![]);
+    }
+
+    #[test]
+    fn no_nodes_is_an_empty_list() {
+        let (prs, _) = parse_response(r#"{"data":{"search":{"nodes":[]}}}"#).unwrap();
+        assert_eq!(prs, vec![]);
+    }
+
+    #[test]
     fn ci_state_mapping() {
         assert_eq!(ci_state("SUCCESS"), CiState::Success);
         assert_eq!(ci_state("FAILURE"), CiState::Failure);
         assert_eq!(ci_state("ERROR"), CiState::Failure);
         assert_eq!(ci_state("PENDING"), CiState::Pending);
         assert_eq!(ci_state("EXPECTED"), CiState::Pending);
+    }
+
+    #[test]
+    fn status_error_mapping() {
+        assert!(status_error(200).is_none());
+        assert_eq!(
+            status_error(401).unwrap().to_string(),
+            "GitHub rejected the token (401)"
+        );
+        assert_eq!(
+            status_error(403).unwrap().to_string(),
+            "GitHub rate limited (HTTP 403)"
+        );
+        assert_eq!(
+            status_error(429).unwrap().to_string(),
+            "GitHub rate limited (HTTP 429)"
+        );
+        assert_eq!(status_error(500).unwrap().to_string(), "GitHub HTTP 500");
     }
 }

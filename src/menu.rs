@@ -73,6 +73,14 @@ pub fn build_menu(snapshot: &Snapshot, avatars: &HashMap<String, RgbaImage>) -> 
         ))?;
     }
 
+    if snapshot.total > snapshot.prs.len() {
+        menu.append(&MenuItem::new(
+            format!("Showing {} of {}", snapshot.prs.len(), snapshot.total),
+            false,
+            None,
+        ))?;
+    }
+
     if !snapshot.prs.is_empty() || snapshot.updated_at.is_some() {
         menu.append(&PredefinedMenuItem::separator())?;
     }
@@ -108,6 +116,7 @@ pub fn tray_title(snapshot: &Snapshot) -> Option<String> {
     }
     match snapshot.prs.len() {
         0 => None,
+        n if snapshot.total > n => Some(format!("{n}+")),
         n => Some(n.to_string()),
     }
 }
@@ -147,7 +156,7 @@ fn symbol(state: ReviewState) -> &'static str {
     }
 }
 
-fn truncate(text: &str, max_chars: usize) -> String {
+pub(crate) fn truncate(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         return text.to_owned();
     }
@@ -232,6 +241,14 @@ mod tests {
 
         snap.prs = vec![pr("a"), pr("b")];
         assert_eq!(tray_title(&snap).as_deref(), Some("2"));
+
+        snap.total = 7;
+        assert_eq!(
+            tray_title(&snap).as_deref(),
+            Some("2+"),
+            "total past the cap shows a plus"
+        );
+        snap.total = snap.prs.len();
 
         snap.error = Some("boom".into());
         assert_eq!(tray_title(&snap).as_deref(), Some("!"));

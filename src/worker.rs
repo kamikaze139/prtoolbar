@@ -62,12 +62,16 @@ fn run(proxy: &EventLoopProxy<AppEvent>, rx: &Receiver<Command>, interval: Durat
         let result =
             auth::resolve_token().and_then(|token| github::fetch_open_prs(&github, &token));
         match result {
-            Ok(prs) => {
+            Ok((prs, total)) => {
+                let total = usize::try_from(total).unwrap_or(usize::MAX);
                 let urls: Vec<String> = prs
                     .iter()
                     .flat_map(|pr| pr.reviewers.iter().map(|r| r.avatar_url.clone()))
                     .collect();
-                if proxy.send_event(AppEvent::Loaded(prs)).is_err() {
+                if proxy
+                    .send_event(AppEvent::Loaded { prs, total })
+                    .is_err()
+                {
                     return;
                 }
                 let fresh = cache.fetch_missing(&cdn, urls);

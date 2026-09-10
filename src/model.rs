@@ -107,6 +107,9 @@ pub fn merge_reviewers(first: Vec<Reviewer>, second: Vec<Reviewer>) -> Vec<Revie
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
     pub prs: Vec<PullRequest>,
+    /// Total open PRs matched by the search, which may exceed `prs.len()`
+    /// past the 50-PR menu cap.
+    pub total: usize,
     /// Local wall-clock time of the last successful fetch, `HH:MM`.
     pub updated_at: Option<String>,
     /// Message of the most recent failed fetch, cleared on success.

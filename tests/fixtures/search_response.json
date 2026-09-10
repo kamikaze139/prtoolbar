@@ -1,6 +1,7 @@
 {
   "data": {
     "search": {
+      "issueCount": 2,
       "nodes": [
         {
           "number": 42,

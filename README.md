@@ -6,7 +6,8 @@ A tiny macOS menu bar app that lists your open GitHub pull requests.
   changes requested), yellow waiting, grey draft.
 - Under each PR: the requested reviewers as avatars, with ✓ / ✗ / 💬 / ⏳.
 - Click a PR to open it in your browser.
-- Count of open PRs next to the menu bar icon. Refreshes every minute.
+- Count of open PRs next to the menu bar icon. Refreshes every minute. Past
+  50 open PRs the title shows `50+` and the menu ends with `Showing 50 of N`.
 
 Written in Rust with a native `NSStatusItem` menu. No webview, no Electron,
 no config file.

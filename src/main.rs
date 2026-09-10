@@ -78,8 +78,9 @@ struct App {
 impl App {
     fn handle(&mut self, event: AppEvent) {
         match event {
-            AppEvent::Loaded(prs) => {
+            AppEvent::Loaded { prs, total } => {
                 self.snapshot.prs = prs;
+                self.snapshot.total = total;
                 self.snapshot.error = None;
                 self.snapshot.updated_at = Some(now_hhmm());
                 self.rebuild();
