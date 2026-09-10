@@ -10,6 +10,7 @@ mod auth;
 mod avatars;
 mod github;
 mod icons;
+mod menu;
 mod model;
 
 use std::thread;
