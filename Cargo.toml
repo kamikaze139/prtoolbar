@@ -1,0 +1,44 @@
+[package]
+name = "prtoolbar"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "macOS menu bar app that lists your open GitHub pull requests"
+license = "MIT"
+repository = "https://github.com/kamikaze139/prtoolbar"
+publish = false
+
+[dependencies]
+anyhow = "1"
+env_logger = "0.11"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+jiff = "0.2"
+log = "0.4"
+open = "5"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tao = "0.37"
+tray-icon = "0.24"
+ureq = { version = "3", features = ["json"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unused_qualifications = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+
+[package.metadata.bundle]
+name = "prtoolbar"
+identifier = "de.kaminski.prtoolbar"
+osx_minimum_system_version = "12.0"
+osx_info_plist_exts = ["bundle/Info.plist.ext"]
