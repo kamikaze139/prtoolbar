@@ -6,6 +6,7 @@
 
 #![allow(dead_code)] // Removed in Task 8 once every module is wired up.
 
+mod auth;
 mod github;
 mod model;
 
