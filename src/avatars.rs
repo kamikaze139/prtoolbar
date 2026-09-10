@@ -3,12 +3,14 @@
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
+// Pixel maths on 36 px canvases; the casts are exact.
 
 //! Reviewer avatars: download, circular mask, and side-by-side strips.
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use image::imageops::{self, FilterType};
 use image::{Rgba, RgbaImage};
 use ureq::Agent;
@@ -21,6 +23,8 @@ pub const AVATAR_PX: u32 = 32;
 pub const GAP_PX: u32 = 6;
 /// Avatars shown per PR before the label falls back to `+N`.
 pub const MAX_AVATARS: usize = 5;
+/// How long a failed URL is skipped before being retried.
+pub const RETRY_AFTER: Duration = Duration::from_secs(600);
 
 const GREY: [u8; 3] = [0x8E, 0x8E, 0x93];
 
@@ -28,46 +32,76 @@ const GREY: [u8; 3] = [0x8E, 0x8E, 0x93];
 #[derive(Debug, Default)]
 pub struct AvatarCache {
     images: HashMap<String, RgbaImage>,
+    /// URLs that failed to fetch, with the time of the last failure.
+    failed: HashMap<String, Instant>,
 }
 
 impl AvatarCache {
     /// Fetch every URL not yet cached and return only those new entries.
     ///
-    /// Failures are logged and cached as a placeholder so they are not retried
-    /// on every refresh. Empty URLs are ignored.
+    /// Failures are logged and skipped on later calls for [`RETRY_AFTER`] so
+    /// they are not retried on every refresh, but they are not cached
+    /// forever either. Empty URLs are ignored.
     pub fn fetch_missing(
         &mut self,
         agent: &Agent,
         urls: impl IntoIterator<Item = String>,
+    ) -> HashMap<String, RgbaImage> {
+        self.fetch_missing_with(urls, |url| fetch(agent, url))
+    }
+
+    /// Core of [`Self::fetch_missing`], parameterised over the fetch
+    /// function so it can be unit-tested without the network.
+    pub fn fetch_missing_with(
+        &mut self,
+        urls: impl IntoIterator<Item = String>,
+        mut fetch: impl FnMut(&str) -> Result<RgbaImage>,
     ) -> HashMap<String, RgbaImage> {
         let mut fresh = HashMap::new();
         for url in urls {
             if url.is_empty() || self.images.contains_key(&url) || fresh.contains_key(&url) {
                 continue;
             }
-            let image = match fetch(agent, &url) {
-                Ok(image) => image,
+            if self
+                .failed
+                .get(&url)
+                .is_some_and(|failed_at| failed_at.elapsed() < RETRY_AFTER)
+            {
+                continue;
+            }
+            match fetch(&url) {
+                Ok(image) => {
+                    self.failed.remove(&url);
+                    self.images.insert(url.clone(), image.clone());
+                    fresh.insert(url, image);
+                }
                 Err(err) => {
                     log::warn!("avatar {url}: {err:#}");
-                    placeholder()
+                    self.failed.insert(url.clone(), Instant::now());
+                    fresh.insert(url, placeholder());
                 }
-            };
-            fresh.insert(url, image);
+            }
         }
-        self.images
-            .extend(fresh.iter().map(|(k, v)| (k.clone(), v.clone())));
         fresh
+    }
+
+    /// Push every failure timestamp `by` further into the past, so
+    /// [`RETRY_AFTER`] can be exercised without sleeping in tests.
+    #[cfg(test)]
+    fn age_failures(&mut self, by: Duration) {
+        for instant in self.failed.values_mut() {
+            *instant = instant.checked_sub(by).unwrap_or(*instant);
+        }
     }
 }
 
 fn fetch(agent: &Agent, url: &str) -> Result<RgbaImage> {
-    let bytes = agent
-        .get(url)
-        .call()
-        .context("request failed")?
-        .body_mut()
-        .read_to_vec()
-        .context("reading body")?;
+    let mut response = agent.get(url).call().context("request failed")?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(anyhow!("HTTP {status}"));
+    }
+    let bytes = response.body_mut().read_to_vec().context("reading body")?;
     decode(&bytes)
 }
 
@@ -204,5 +238,83 @@ mod tests {
             [0x8E, 0x8E, 0x93, 0xFF]
         );
         assert_eq!(p.get_pixel(0, 0).0[3], 0);
+    }
+
+    #[test]
+    fn already_cached_url_is_not_fetched_again() {
+        let mut cache = AvatarCache::default();
+        let calls = std::cell::Cell::new(0);
+        let fetch = |_: &str| {
+            calls.set(calls.get() + 1);
+            Ok(solid([1, 1, 1]))
+        };
+        cache.fetch_missing_with(["https://a".to_owned()], fetch);
+        assert_eq!(calls.get(), 1);
+
+        let fresh = cache.fetch_missing_with(["https://a".to_owned()], fetch);
+        assert_eq!(calls.get(), 1, "cached URL is not fetched again");
+        assert!(fresh.is_empty(), "cached URL is not returned as fresh");
+    }
+
+    #[test]
+    fn duplicate_url_within_one_call_is_fetched_once() {
+        let mut cache = AvatarCache::default();
+        let calls = std::cell::Cell::new(0);
+        let fetch = |_: &str| {
+            calls.set(calls.get() + 1);
+            Ok(solid([1, 1, 1]))
+        };
+        let fresh =
+            cache.fetch_missing_with(["https://a".to_owned(), "https://a".to_owned()], fetch);
+        assert_eq!(calls.get(), 1);
+        assert_eq!(fresh.len(), 1);
+    }
+
+    #[test]
+    fn empty_url_is_ignored() {
+        let mut cache = AvatarCache::default();
+        let calls = std::cell::Cell::new(0);
+        let fetch = |_: &str| {
+            calls.set(calls.get() + 1);
+            Ok(solid([1, 1, 1]))
+        };
+        let fresh = cache.fetch_missing_with([String::new()], fetch);
+        assert_eq!(calls.get(), 0);
+        assert!(fresh.is_empty());
+    }
+
+    #[test]
+    fn failing_fetch_yields_placeholder_and_is_not_retried_immediately() {
+        let mut cache = AvatarCache::default();
+        let calls = std::cell::Cell::new(0);
+        let fetch = |_: &str| {
+            calls.set(calls.get() + 1);
+            Err(anyhow!("boom"))
+        };
+        let fresh = cache.fetch_missing_with(["https://a".to_owned()], fetch);
+        assert_eq!(calls.get(), 1);
+        assert_eq!(fresh.get("https://a").unwrap(), &placeholder());
+
+        let fresh = cache.fetch_missing_with(["https://a".to_owned()], fetch);
+        assert_eq!(calls.get(), 1, "recent failure is not retried");
+        assert!(fresh.is_empty());
+    }
+
+    #[test]
+    fn failure_is_retried_after_it_ages_past_retry_after() {
+        let mut cache = AvatarCache::default();
+        let calls = std::cell::Cell::new(0);
+        let fail = |_: &str| {
+            calls.set(calls.get() + 1);
+            Err(anyhow!("boom"))
+        };
+        let fresh = cache.fetch_missing_with(["https://a".to_owned()], fail);
+        assert_eq!(fresh.get("https://a").unwrap(), &placeholder());
+
+        cache.age_failures(RETRY_AFTER + Duration::from_secs(1));
+
+        let succeed = |_: &str| Ok(solid([9, 9, 9]));
+        let fresh = cache.fetch_missing_with(["https://a".to_owned()], succeed);
+        assert_eq!(fresh.get("https://a").unwrap(), &solid([9, 9, 9]));
     }
 }

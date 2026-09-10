@@ -64,19 +64,22 @@ fn run(proxy: &EventLoopProxy<AppEvent>, rx: &Receiver<Command>, interval: Durat
         match result {
             Ok((prs, total)) => {
                 let total = usize::try_from(total).unwrap_or(usize::MAX);
-                let urls: Vec<String> = prs
-                    .iter()
-                    .flat_map(|pr| pr.reviewers.iter().map(|r| r.avatar_url.clone()))
-                    .collect();
                 if proxy
-                    .send_event(AppEvent::Loaded { prs, total })
+                    .send_event(AppEvent::Loaded {
+                        prs: prs.clone(),
+                        total,
+                    })
                     .is_err()
                 {
                     return;
                 }
-                let fresh = cache.fetch_missing(&cdn, urls);
-                if !fresh.is_empty() && proxy.send_event(AppEvent::Avatars(fresh)).is_err() {
-                    return;
+                for pr in &prs {
+                    let urls: Vec<String> =
+                        pr.reviewers.iter().map(|r| r.avatar_url.clone()).collect();
+                    let fresh = cache.fetch_missing(&cdn, urls);
+                    if !fresh.is_empty() && proxy.send_event(AppEvent::Avatars(fresh)).is_err() {
+                        return;
+                    }
                 }
             }
             Err(err) => {
