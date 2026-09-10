@@ -8,6 +8,7 @@
 
 mod auth;
 mod github;
+mod icons;
 mod model;
 
 use std::thread;
