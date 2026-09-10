@@ -131,7 +131,8 @@ pub enum Status { Ready, Blocked, Waiting, Draft }
 
 1. `is_draft` → `Draft` (grey)
 2. `ci == Failure` or `decision == ChangesRequested` → `Blocked` (red)
-3. `ci == Success` and `decision == Approved` → `Ready` (green)
+3. `ci ∈ {Success, None}` and `decision ∈ {Approved, None}` → `Ready` (green).
+   `None` means "nothing configured", which should not hold a PR back.
 4. otherwise → `Waiting` (yellow)
 
 Reviewer list = union of `reviewRequests` (state `Pending`) and
@@ -153,14 +154,16 @@ Updated 12:03                                        ← disabled
 Quit prtoolbar                             ⌘Q
 ```
 
-- Status dot: 16 px circle rendered at 2x (32 px bitmap) for Retina. Colors:
+- Bitmaps are 36 px tall. Both `muda` and `tray-icon` scale menu and status
+  item images to 18 pt high on macOS, so 36 px is exactly 2x for Retina.
+- Status dot: 20 px circle centred on a 36 px canvas (10 pt on screen). Colors:
   green `#34C759`, red `#FF3B30`, yellow `#FFCC00`, grey `#8E8E93`
   (Apple system colors).
 - PR label: `{repo} #{number}   {title}`, title truncated to 60 chars with `…`.
 - Reviewer label: each reviewer as `{login}{symbol}` joined by two spaces.
   Symbols: `✓` approved, `✗` changes requested, `💬` commented, `⏳` pending.
-- Reviewer icon: horizontal strip of up to 5 circular 16 px avatars with 2 px
-  gaps, composed into one bitmap. Avatars that fail to load are drawn as a
+- Reviewer icon: horizontal strip of up to 5 circular 32 px avatars with 6 px
+  gaps on a 36 px tall canvas, composed into one bitmap. Avatars that fail to load are drawn as a
   grey circle. More than 5 reviewers → 5 avatars and `+N` in the label.
 - Menubar: template icon (monochrome pull-request glyph) with `set_title`
   showing the count, e.g. `⑂ 3`. Zero PRs → no title. While the first load is
@@ -180,8 +183,10 @@ Quit prtoolbar                             ⌘Q
   (tens of items) and avoids diffing logic.
 - Click on PR item → `open::that(url)`. Any error from `open` is logged, not
   shown.
-- Avatars are fetched by the worker *after* the PR list, so a slow CDN never
-  delays the list. Cache is keyed by URL and lives for the process lifetime.
+- Avatars are fetched by the worker *after* it has sent the PR list
+  (`AppEvent::Loaded`), so a slow CDN never delays the list. Newly fetched
+  avatars arrive as a second event (`AppEvent::Avatars`) and trigger one more
+  menu rebuild. The cache is keyed by URL and lives for the process lifetime.
   Cache misses are fetched with a 5 s timeout.
 
 ## Error handling
@@ -250,6 +255,7 @@ A config file is a v2 concern.
 | `open` | 5 | Open URLs |
 | `anyhow` | 1 | Error plumbing |
 | `log`, `env_logger` | 0.4 / 0.11 | Logging |
+| `jiff` | 0.2 | Local time for the "Updated HH:MM" line |
 
 ## Open questions for the user
 
