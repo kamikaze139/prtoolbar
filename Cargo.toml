@@ -6,7 +6,12 @@ rust-version = "1.88"
 description = "A tiny macOS menu bar app that lists your open GitHub pull requests"
 license = "MIT"
 repository = "https://github.com/kamikaze139/prtoolbar"
-publish = false
+# prtoolbar is an app, not a library: it never goes to a registry, and
+# `cargo publish` fails here with "registry index was not found".
+# `publish = false` would say that more plainly, but release-plz drops
+# non-publishable packages before it gets as far as tagging, so it would never
+# cut a release. Publishing is switched off in release-plz.toml instead.
+publish = ["never-published"]
 
 [dependencies]
 anyhow = "1"

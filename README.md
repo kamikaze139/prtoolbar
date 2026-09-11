@@ -143,16 +143,17 @@ The version is derived from the commit messages, which follow
 | Commit prefix | Bump |
 |---|---|
 | `feat:` | minor — `0.1.0` → `0.2.0` |
-| `fix:`, `perf:`, `refactor:`, `docs:` | patch — `0.1.0` → `0.1.1` |
 | breaking (`feat!:` or a `BREAKING CHANGE:` trailer) | minor, while the version is below `1.0.0` |
-| `chore:`, `ci:`, `build:`, `test:`, `style:` | none — these never cut a release on their own |
+| anything else (`fix:`, `perf:`, `docs:`, `ci:`, `chore:`, …) | patch — `0.1.0` → `0.1.1` |
 
-The flow is three steps, all in GitHub Actions:
+**Every merge to `main` releases.** There is nothing to click and no release PR
+to merge:
 
-1. Push to `main`. `release-plz` opens or updates a **release PR** that bumps
-   `Cargo.toml` and `Cargo.lock` and writes `CHANGELOG.md`.
-2. Merge that PR. `release-plz` tags the merge commit `vX.Y.Z` and creates the
-   GitHub release, using the changelog section as the body.
+1. **Release-plz** computes the next version, rewrites `Cargo.toml`,
+   `Cargo.lock` and `CHANGELOG.md`, and commits the result straight to `main`
+   as `chore: release vX.Y.Z`.
+2. It tags that commit `vX.Y.Z` and creates the GitHub release, using the
+   changelog section as the body.
 3. The same workflow run then calls the **Release** workflow, which builds the
    universal `prtoolbar.app`, signs it, and attaches the zip and its SHA-256 to
    that release. It is called directly rather than triggered by the tag push,
@@ -160,15 +161,28 @@ The flow is three steps, all in GitHub Actions:
 4. The public Homebrew tap checks for new releases hourly, copies the completed
    archive, and updates its cask. Users receive it through `brew upgrade`.
 
+Because every merge ships a build, every commit type appears in the changelog —
+a release whose notes were empty would leave its version bump unexplained. The
+one exception is the workflow's own `chore: release` commit. If you would rather
+only some commits released, set `release_commits` in `release-plz.toml` to a
+regex such as `"^(feat|fix|perf)[(!:]"`.
+
 Behaviour is configured in `release-plz.toml`. prtoolbar is an application, not
-a library, so it is never published to crates.io (`publish = false`). Because
-nothing is published, `git_only = true` tells `release-plz` to read the last
-released version from the `v*` git tags; without it, it consults the crates.io
-index, never finds the crate, concludes the current version is still an
-unreleased first release, and opens no release PR at all.
+a library, so `publish = false` there stops it ever reaching a registry, and
+`git_only = true` tells `release-plz` to read the last released version from
+the `v*` git tags; without it, it consults the crates.io index, never finds the
+crate, concludes the current version is still an unreleased first release, and
+never releases at all.
+
+`Cargo.toml` blocks publishing a second way, with `publish = ["never-published"]`
+rather than the more obvious `publish = false`. That is deliberate: `release-plz`
+filters out packages `Cargo.toml` marks unpublishable *before* it decides what to
+tag, so `publish = false` there silently stops every release. A registry name
+that resolves to nothing makes `cargo publish` fail just as hard while leaving
+the tagging alone.
 
 To cut `1.0.0`, or to make breaking changes bump the major version from then
-on, set the version in `Cargo.toml` to `1.0.0` once by hand and merge; the
+on, set the version in `Cargo.toml` to `1.0.0` once by hand and push; the
 automation takes over again from the next commit.
 
 ### Repository secrets
@@ -177,16 +191,13 @@ All of these are optional. The table says what degrades without each one.
 
 | Secret | Used for | If unset |
 |---|---|---|
-| `RELEASE_PLZ_TOKEN` | Opening the release PR and pushing the tag | Falls back to `GITHUB_TOKEN`. Releases and app builds still happen; the only loss is that CI does not run on the release PR |
 | `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGNING_IDENTITY` | Developer ID signing | The app is ad-hoc signed |
 | `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | Apple notarization | Notarization is skipped; release notes and the cask explain the first-launch approval |
 
-`RELEASE_PLZ_TOKEN` is a fine-grained personal access token scoped to this
-repository with **Contents: read and write** and **Pull requests: read and
-write**. It exists only to work around GitHub's rule that events created with
-the built-in `GITHUB_TOKEN` do not trigger further workflows — here, that the
-release PR opens without CI running on it. Closing and reopening that PR by
-hand starts CI too.
+Releasing needs no token beyond the built-in `GITHUB_TOKEN`, and deliberately
+so: GitHub will not start a workflow run from a push its own token made, which
+is exactly what stops the release commit from re-triggering the release. Do not
+swap in a personal access token.
 
 `MACOS_CERTIFICATE_P12` is a base64 encoding of a Developer ID Application
 certificate exported as `.p12`:
@@ -221,7 +232,7 @@ and `sync_homebrew.py`; copy relevant changes there when modifying the tooling.
 Apple signing and notarization remain optional.
 
 No token beyond the built-in `GITHUB_TOKEN` is needed for a release-plz tag to
-produce a build. The first release uses the existing `0.1.0` package version.
+produce a build.
 
 Validation runs in CI and locally with:
 
