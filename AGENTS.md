@@ -160,12 +160,14 @@ not hand-write `CHANGELOG.md`** — `release-plz` owns both.
 1. Push to `main`. `release-plz` opens a release PR with the version bump and
    changelog.
 2. Merge it. That tags `vX.Y.Z` and creates the GitHub release.
-3. The tag triggers `release.yml`, which builds the universal `.app`, signs it
-   and attaches it.
+3. The same run then calls `release.yml`, which builds the universal `.app`,
+   signs it and attaches it.
 
 Configuration is in `release-plz.toml`. The app is never published to
-crates.io (`publish = false`). The one manual step is cutting `1.0.0`: set it
-by hand once, then automation resumes.
+crates.io (`publish = false`), so `git_only = true` makes `release-plz` derive
+the last released version from the `v*` git tags instead of the crates.io
+index. The one manual step is cutting `1.0.0`: set it by hand once, then
+automation resumes.
 
 ## CI
 

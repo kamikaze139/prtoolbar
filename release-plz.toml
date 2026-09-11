@@ -3,14 +3,20 @@
 #
 # On every push to main, release-plz opens (or updates) a "release" PR that
 # bumps the version in Cargo.toml/Cargo.lock and writes CHANGELOG.md. Merging
-# that PR tags the commit `vX.Y.Z` and creates the GitHub release; the tag push
-# then triggers .github/workflows/release.yml, which attaches prtoolbar.app.
+# that PR tags the commit `vX.Y.Z` and creates the GitHub release, and the same
+# workflow run then calls .github/workflows/release.yml to attach prtoolbar.app.
 
 [workspace]
 # prtoolbar is an app, not a library: it never goes to crates.io, and
 # cargo-semver-checks has no public API to check.
 publish = false
 semver_check = false
+
+# The crate is never published, so the crates.io index can't tell release-plz
+# what was last released: without this it treats every run as the unreleased
+# first release, keeps proposing the current version, and opens no release PR.
+# git_only makes it read the last release from the `v*` git tags instead.
+git_only = true
 
 git_tag_enable = true
 git_tag_name = "v{{ version }}"

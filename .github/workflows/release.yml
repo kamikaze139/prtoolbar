@@ -1,12 +1,26 @@
 name: Release
 
 # Builds prtoolbar.app for the tag release-plz created and attaches it to the
-# GitHub release. Also runnable by hand against any existing tag, which is the
-# fallback when release-plz runs without a PAT (see release-plz.yml).
+# GitHub release.
+#
+# Normally invoked by release-plz.yml through workflow_call, right after it
+# tags the release. That path is deliberate: release-plz creates the tag with
+# a token, and when that token is the built-in GITHUB_TOKEN, GitHub refuses to
+# start a new workflow run from the resulting tag push. Calling this workflow
+# from the same run sidesteps that, so no PAT is required.
+#
+# The `push: tags` trigger still fires for tags pushed by a human or a PAT,
+# and workflow_dispatch rebuilds any existing tag by hand.
 
 on:
   push:
     tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: Tag to build, e.g. v0.2.0
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:

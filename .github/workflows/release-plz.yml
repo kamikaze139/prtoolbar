@@ -2,11 +2,15 @@ name: Release-plz
 
 # Semantic versioning from Conventional Commits. See release-plz.toml.
 #
-# Token: set a fine-grained PAT as the RELEASE_PLZ_TOKEN secret (contents:
-# write, pull-requests: write). Without it the built-in GITHUB_TOKEN is used,
-# but GitHub refuses to trigger workflows from its own token, so neither CI on
-# the release PR nor the tag-triggered Release workflow will fire. In that case
-# run the Release workflow manually via workflow_dispatch.
+# Token: the built-in GITHUB_TOKEN is enough to cut a release. GitHub refuses
+# to start a workflow run from an event its own token caused, so the `bundle`
+# job below calls .github/workflows/release.yml directly instead of relying on
+# the tag push to trigger it.
+#
+# The one thing GITHUB_TOKEN cannot do is run CI on the release PR that
+# `release-pr` opens. Set a fine-grained PAT as the RELEASE_PLZ_TOKEN secret
+# (contents: write, pull-requests: write) if you want that PR checked before
+# you merge it; closing and reopening the PR by hand also works.
 
 on:
   push:
@@ -25,6 +29,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      released: ${{ steps.release-plz.outputs.releases_created }}
+      tag: ${{ steps.release-plz.outputs.releases_created == 'true' && fromJSON(steps.release-plz.outputs.releases)[0].tag || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,10 +40,24 @@ jobs:
           token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: release-plz/action@v0.5
+        id: release-plz
         with:
           command: release
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+
+  bundle:
+    name: attach prtoolbar.app to the release
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    permissions:
+      contents: write
+    # Called directly rather than left to the tag push, which GITHUB_TOKEN
+    # cannot trigger. See the comment at the top of this file.
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+    secrets: inherit
 
   release-pr:
     name: open the version-bump PR
