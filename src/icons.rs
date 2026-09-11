@@ -7,12 +7,12 @@
 
 //! Bitmaps drawn at runtime: status dots and the menu bar glyph.
 //!
-//! Everything is 36 px tall. `muda` and `tray-icon` scale images to 18 pt on
-//! macOS, so 36 px is exactly 2x for Retina displays.
+//! Menu and tray images are 36 px tall. `muda` and `tray-icon` scale them to
+//! 18 pt on macOS. The 18 px reviewer badges are composited into these images.
 
 use image::{Rgba, RgbaImage};
 
-use crate::model::Status;
+use crate::model::{ReviewState, Status};
 
 /// Height (and width, for square icons) of every bitmap in pixels.
 pub const ICON_PX: u32 = 36;
@@ -35,6 +35,31 @@ pub fn status_dot(status: Status) -> RgbaImage {
     let centre = ICON_PX as f32 / 2.0;
     fill_circle(&mut img, centre, centre, 10.0, rgb);
     img
+}
+
+/// Small GitHub-style reviewer badge: check, cross, comment, or pending clock.
+pub fn review_badge(state: ReviewState) -> RgbaImage {
+    let (colour, glyph) = match state {
+        ReviewState::Approved => (GREEN, ["     ", "    #", "#  # ", " ##  ", "     "]),
+        ReviewState::ChangesRequested => (RED, ["#   #", " # # ", "  #  ", " # # ", "#   #"]),
+        ReviewState::Commented => (GREY, ["#####", "#   #", "#   #", "#####", " #   "]),
+        ReviewState::Pending => (YELLOW, ["  #  ", "  #  ", "  ###", "     ", "     "]),
+    };
+    let mut badge = RgbaImage::new(18, 18);
+    fill_circle(&mut badge, 9.0, 9.0, 9.0, colour);
+    let ink = if state == ReviewState::Pending {
+        BLACK
+    } else {
+        [255, 255, 255]
+    };
+    for (y, row) in glyph.iter().enumerate() {
+        for (x, pixel) in row.bytes().enumerate() {
+            if pixel == b'#' {
+                fill_rect(&mut badge, 4 + x as u32 * 2, 4 + y as u32 * 2, 2, 2, ink);
+            }
+        }
+    }
+    badge
 }
 
 /// A monochrome pull-request glyph (two branch dots joined by a line, with a

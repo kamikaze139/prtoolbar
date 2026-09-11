@@ -2,9 +2,15 @@
 
 A tiny macOS menu bar app that lists your open GitHub pull requests.
 
-- One line per PR with a coloured dot: green ready, red blocked (CI failed or
+- PRs grouped alphabetically by repository, newest activity first within each
+  group. One compact, clickable row per PR with a coloured dot: green ready, red blocked (CI failed or
   changes requested), yellow waiting, grey draft.
-- Under each PR: the requested reviewers as avatars, with ✓ / ✗ / 💬 / ⏳.
+- Beside the PR number: ✓ approved, ✗ changes requested, or ⏳ review required.
+  This review decision is separate from CI status.
+- On the same row: reviewer avatars with coloured badges and names with
+  ✓ approved / ✗ changes requested / 💬 commented / ⏳ pending. Up to five
+  reviewers are shown, followed by `+N` for any remaining reviewers.
+  A new review request takes precedence over that person's earlier review.
 - Click a PR to open it in your browser.
 - Count of open PRs next to the menu bar icon. Refreshes every minute. Past
   50 open PRs the title shows `50+` and the menu ends with `Showing 50 of N`.

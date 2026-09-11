@@ -3,20 +3,20 @@
 //! `build_menu` touches `AppKit` and must run on the main thread. The label
 //! helpers are pure and tested here.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use anyhow::Result;
-use image::RgbaImage;
+use image::{RgbaImage, imageops};
 use tray_icon::menu::accelerator::Accelerator;
 use tray_icon::menu::{IconMenuItem, Menu, MenuId, MenuItem, PredefinedMenuItem};
 
 use crate::avatars::{MAX_AVATARS, compose_strip, placeholder};
-use crate::icons::{menu_icon, status_dot};
-use crate::model::{PullRequest, ReviewState, Reviewer, Snapshot, Status};
+use crate::icons::{ICON_PX, menu_icon, review_badge, status_dot};
+use crate::model::{PullRequest, ReviewDecision, ReviewState, Reviewer, Snapshot, Status};
 
 /// Menu id of the "Refresh" item.
 pub const REFRESH_ID: &str = "refresh";
-const TITLE_MAX_CHARS: usize = 60;
+const TITLE_MAX_CHARS: usize = 44;
 
 /// What to do when a menu item is activated.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,30 +47,23 @@ pub fn build_menu(snapshot: &Snapshot, avatars: &HashMap<String, RgbaImage>) -> 
         menu.append(&MenuItem::new("No open pull requests 🎉", false, None))?;
     }
 
-    for pr in &snapshot.prs {
-        let id = MenuId::new(&pr.url);
-        let dot = menu_icon(&status_dot(Status::derive(pr)));
-        menu.append(&IconMenuItem::with_id(
-            id.clone(),
-            pr_label(pr),
-            true,
-            Some(dot),
-            None,
-        ))?;
-        actions.insert(id, Action::OpenUrl(pr.url.clone()));
-
-        let images: Vec<&RgbaImage> = pr
-            .reviewers
-            .iter()
-            .map(|r| avatars.get(&r.avatar_url).unwrap_or(&fallback))
-            .collect();
-        let strip = (!images.is_empty()).then(|| menu_icon(&compose_strip(&images)));
-        menu.append(&IconMenuItem::new(
-            reviewers_label(&pr.reviewers),
+    for (repo, prs) in group_by_repo(&snapshot.prs) {
+        menu.append(&MenuItem::new(
+            format!("{repo} ({})", prs.len()),
             false,
-            strip,
             None,
         ))?;
+        for pr in prs {
+            let id = MenuId::new(&pr.url);
+            menu.append(&IconMenuItem::with_id(
+                id.clone(),
+                pr_label(pr),
+                true,
+                Some(menu_icon(&pr_icon(pr, avatars, &fallback))),
+                None,
+            ))?;
+            actions.insert(id, Action::OpenUrl(pr.url.clone()));
+        }
     }
 
     if snapshot.total > snapshot.prs.len() {
@@ -121,21 +114,70 @@ pub fn tray_title(snapshot: &Snapshot) -> Option<String> {
     }
 }
 
-/// `owner/repo #123   Title`, title capped at 60 characters.
-pub fn pr_label(pr: &PullRequest) -> String {
-    format!(
-        "{} #{}   {}",
-        pr.repo,
-        pr.number,
-        truncate(&pr.title, TITLE_MAX_CHARS)
-    )
+/// Alphabetical repository sections, retaining newest-activity order within each.
+fn group_by_repo(prs: &[PullRequest]) -> BTreeMap<&str, Vec<&PullRequest>> {
+    let mut groups: BTreeMap<&str, Vec<&PullRequest>> = BTreeMap::new();
+    for pr in prs {
+        groups.entry(&pr.repo).or_default().push(pr);
+    }
+    groups
 }
 
-/// `alice ✓  bob ⏳`, or `no reviewers requested`, with `+N` past five.
-pub fn reviewers_label(reviewers: &[Reviewer]) -> String {
-    if reviewers.is_empty() {
-        return "no reviewers requested".to_owned();
+/// One image keeps the overall status dot and badged avatars on the PR row.
+fn pr_icon(
+    pr: &PullRequest,
+    avatars: &HashMap<String, RgbaImage>,
+    fallback: &RgbaImage,
+) -> RgbaImage {
+    let dot = status_dot(Status::derive(pr));
+    if pr.reviewers.is_empty() {
+        return dot;
     }
+    let images: Vec<RgbaImage> = pr
+        .reviewers
+        .iter()
+        .take(MAX_AVATARS)
+        .map(|reviewer| {
+            let mut avatar = avatars
+                .get(&reviewer.avatar_url)
+                .unwrap_or(fallback)
+                .clone();
+            let badge = review_badge(reviewer.state);
+            let x = i64::from(avatar.width()) - i64::from(badge.width());
+            let y = i64::from(avatar.height()) - i64::from(badge.height());
+            imageops::overlay(&mut avatar, &badge, x, y);
+            avatar
+        })
+        .collect();
+    let strip = compose_strip(&images.iter().collect::<Vec<_>>());
+    let mut icon = RgbaImage::new(ICON_PX + strip.width(), ICON_PX);
+    imageops::overlay(&mut icon, &dot, 0, 0);
+    imageops::overlay(&mut icon, &strip, i64::from(ICON_PX), 0);
+    icon
+}
+
+/// PR number, aggregate review decision, short title and individual reviewers.
+pub fn pr_label(pr: &PullRequest) -> String {
+    let decision = match pr.decision {
+        ReviewDecision::Approved => " ✓",
+        ReviewDecision::ChangesRequested => " ✗",
+        ReviewDecision::Required => " ⏳",
+        ReviewDecision::None => "",
+    };
+    let mut label = format!(
+        "#{}{decision}   {}",
+        pr.number,
+        truncate(&pr.title, TITLE_MAX_CHARS)
+    );
+    if !pr.reviewers.is_empty() {
+        label.push_str("  ·  ");
+        label.push_str(&reviewers_label(&pr.reviewers));
+    }
+    label
+}
+
+/// `alice ✓  bob ⏳`, or empty when nobody is assigned, with `+N` past five.
+pub fn reviewers_label(reviewers: &[Reviewer]) -> String {
     let mut parts: Vec<String> = reviewers
         .iter()
         .take(MAX_AVATARS)
@@ -192,8 +234,8 @@ mod tests {
     }
 
     #[test]
-    fn pr_label_has_repo_number_and_title() {
-        assert_eq!(pr_label(&pr("Fix it")), "acme/widgets #42   Fix it");
+    fn pr_label_omits_repo_and_empty_review_summary() {
+        assert_eq!(pr_label(&pr("Fix it")), "#42 ✓   Fix it");
     }
 
     #[test]
@@ -201,7 +243,7 @@ mod tests {
         let long = "ä".repeat(80);
         let label = pr_label(&pr(&long));
         let title = label.split("   ").nth(1).unwrap();
-        assert_eq!(title.chars().count(), 60);
+        assert_eq!(title.chars().count(), 44);
         assert!(title.ends_with('…'));
     }
 
@@ -218,13 +260,59 @@ mod tests {
 
     #[test]
     fn reviewers_label_handles_none_and_overflow() {
-        assert_eq!(reviewers_label(&[]), "no reviewers requested");
+        assert_eq!(reviewers_label(&[]), "");
         let seven: Vec<Reviewer> = (0..7)
             .map(|i| reviewer(&format!("u{i}"), ReviewState::Pending))
             .collect();
         let label = reviewers_label(&seven);
-        assert!(label.starts_with("u0 ⏳  u1 ⏳  u2 ⏳  u3 ⏳  u4 ⏳"));
-        assert!(label.ends_with("  +2"));
+        assert_eq!(label, "u0 ⏳  u1 ⏳  u2 ⏳  u3 ⏳  u4 ⏳  +2");
+    }
+
+    #[test]
+    fn pr_label_keeps_reviewer_names_and_states_inline() {
+        let mut pull_request = pr("Fix it");
+        pull_request.reviewers = vec![
+            reviewer("alice", ReviewState::Approved),
+            reviewer("bob", ReviewState::Approved),
+            reviewer("carol", ReviewState::Pending),
+        ];
+        assert_eq!(
+            pr_label(&pull_request),
+            "#42 ✓   Fix it  ·  alice ✓  bob ✓  carol ⏳"
+        );
+    }
+
+    #[test]
+    fn pr_label_shows_review_decision_independently_of_ci() {
+        let mut pull_request = pr("Fix it");
+        pull_request.ci = CiState::Failure;
+        for (decision, expected) in [
+            (ReviewDecision::Approved, "#42 ✓   Fix it"),
+            (ReviewDecision::ChangesRequested, "#42 ✗   Fix it"),
+            (ReviewDecision::Required, "#42 ⏳   Fix it"),
+            (ReviewDecision::None, "#42   Fix it"),
+        ] {
+            pull_request.decision = decision;
+            assert_eq!(pr_label(&pull_request), expected);
+        }
+    }
+
+    #[test]
+    fn groups_interleaved_repos_without_losing_prs_or_changing_recency_order() {
+        let mut first = pr("Newest widget");
+        first.repo = "zebra/widgets".into();
+        let second = pr("Other owner's widget");
+        let mut third = pr("Older widget");
+        third.repo = "zebra/widgets".into();
+        let prs = vec![first, second, third];
+        let groups = group_by_repo(&prs);
+        assert_eq!(
+            groups.keys().copied().collect::<Vec<_>>(),
+            ["acme/widgets", "zebra/widgets"]
+        );
+        assert_eq!(groups["acme/widgets"], [&prs[1]]);
+        assert_eq!(groups["zebra/widgets"], [&prs[0], &prs[2]]);
+        assert!(group_by_repo(&[]).is_empty());
     }
 
     #[test]

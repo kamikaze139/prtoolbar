@@ -87,16 +87,12 @@ impl Status {
 
 /// Merge requested reviewers with submitted reviews.
 ///
-/// Order is preserved (first list first). Duplicates by login are collapsed;
-/// a submitted review always beats a pending request.
-pub fn merge_reviewers(first: Vec<Reviewer>, second: Vec<Reviewer>) -> Vec<Reviewer> {
-    let mut out: Vec<Reviewer> = Vec::with_capacity(first.len() + second.len());
-    for reviewer in first.into_iter().chain(second) {
-        if let Some(existing) = out.iter_mut().find(|r| r.login == reviewer.login) {
-            if reviewer.state != ReviewState::Pending {
-                existing.state = reviewer.state;
-            }
-        } else {
+/// Current requests come first and take precedence over earlier submitted
+/// reviews: asking someone to review again makes their review pending.
+pub fn merge_reviewers(requested: Vec<Reviewer>, reviewed: Vec<Reviewer>) -> Vec<Reviewer> {
+    let mut out: Vec<Reviewer> = Vec::with_capacity(requested.len() + reviewed.len());
+    for reviewer in requested.into_iter().chain(reviewed) {
+        if !out.iter().any(|existing| existing.login == reviewer.login) {
             out.push(reviewer);
         }
     }
@@ -218,18 +214,18 @@ mod tests {
             summary,
             vec![
                 ("alice", ReviewState::Pending),
-                ("bob", ReviewState::Approved),
+                ("bob", ReviewState::Pending),
                 ("carol", ReviewState::Commented),
             ]
         );
     }
 
     #[test]
-    fn merge_never_downgrades_a_review_to_pending() {
+    fn rerequested_review_is_pending_despite_a_previous_review() {
         let requested = vec![reviewer("bob", ReviewState::Pending)];
         let reviewed = vec![reviewer("bob", ReviewState::ChangesRequested)];
-        let merged = merge_reviewers(reviewed, requested);
+        let merged = merge_reviewers(requested, reviewed);
         assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].state, ReviewState::ChangesRequested);
+        assert_eq!(merged[0].state, ReviewState::Pending);
     }
 }
