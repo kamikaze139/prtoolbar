@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4](https://github.com/kamikaze139/prtoolbar/compare/v0.1.3...v0.1.4) - 2026-09-11
+
+### Fixed
+
+- *(homebrew)* publish the cask the released renderer generates ([#7](https://github.com/kamikaze139/prtoolbar/pull/7))
+
 ## [0.1.3](https://github.com/kamikaze139/prtoolbar/compare/v0.1.2...v0.1.3) - 2026-09-11
 
 ### Fixed
