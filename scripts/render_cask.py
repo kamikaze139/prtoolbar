@@ -16,10 +16,24 @@ def render(tag: str, repository: str, archive: Path, *, notarized: bool = False)
     if archive.name != expected:
         raise ValueError(f"archive must be named {expected}")
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    # An ad-hoc signature's designated requirement is a bare cdhash, so it changes with every
+    # build. Homebrew can therefore never inherit the user's Gatekeeper approval across an
+    # upgrade (Cask::Quarantine.signing_identity_match), and the "could not verify" dialog
+    # would come back on every single release. Release the app from quarantine instead, and
+    # say so in the caveats: this trades Gatekeeper's check for a working `brew upgrade`.
+    # must_succeed: false because a bundle that cannot be stripped (root-owned /Applications)
+    # should still install and fall back to Open Anyway, not abort half way through.
+    quarantine = "" if notarized else (
+        "\n"
+        "  postflight do\n"
+        '    system_command "/usr/bin/xattr",\n'
+        '                   args: ["-d", "-r", "com.apple.quarantine", "#{appdir}/prtoolbar.app"],\n'
+        "                   must_succeed: false\n"
+        "  end\n"
+    )
     notice = "" if notarized else (
-        "\n    This build is not notarized by Apple. If macOS blocks the first launch,\n"
-        "    open System Settings > Privacy & Security > Open Anyway after trying\n"
-        "    to open the app.\n"
+        "\n    This build is not notarized by Apple, so this cask removes the quarantine\n"
+        "    flag on install and macOS does not verify the app for you.\n"
     )
     return f'''cask "prtoolbar" do
   version "{tag[1:]}"
@@ -34,7 +48,7 @@ def render(tag: str, repository: str, archive: Path, *, notarized: bool = False)
   depends_on macos: :monterey
 
   app "prtoolbar.app"
-
+{quarantine}
   uninstall quit: "de.kaminski.prtoolbar"
 
   caveats <<~EOS

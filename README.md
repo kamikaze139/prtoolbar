@@ -15,9 +15,10 @@ open -a prtoolbar
 Homebrew installs the universal app in Applications and includes GitHub CLI.
 Skip `gh auth login` if you are already signed in. No Rust compiler is needed.
 
-Apple signing credentials are optional. If an unnotarized build is blocked on
-first launch, try opening it, then go to **System Settings → Privacy & Security
-→ Open Anyway**.
+Apple signing credentials are optional. Builds without them are ad-hoc signed
+rather than notarized, so the cask removes macOS's quarantine flag on install
+and the app opens straight away — at the cost of Gatekeeper not verifying it for
+you. The cask's caveats say so at install time.
 
 To update or remove it:
 
@@ -130,9 +131,17 @@ shasum -a 256 -c prtoolbar-vX.Y.Z-universal-apple-darwin.zip.sha256
 ```
 
 Without Apple signing credentials, releases use free ad-hoc signing and are
-not notarized. If macOS blocks the first launch, try opening the app, then go to
-**System Settings → Privacy & Security → Open Anyway**. The release notes state
-whether that particular build was notarized.
+not notarized, so a ZIP downloaded here is quarantined. Clear it after moving the
+app to Applications:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/prtoolbar.app
+```
+
+Or try opening the app and then go to **System Settings → Privacy & Security →
+Open Anyway**. Neither step is needed when installing with `brew install --cask`,
+which clears the flag itself — see [Homebrew installation](#homebrew-installation).
+The release notes state whether that particular build was notarized.
 
 ## Releases and versioning
 
@@ -194,7 +203,7 @@ All of these are optional. The table says what degrades without each one.
 | Secret | Used for | If unset |
 |---|---|---|
 | `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGNING_IDENTITY` | Developer ID signing | The app is ad-hoc signed |
-| `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | Apple notarization | Notarization is skipped; release notes and the cask explain the first-launch approval |
+| `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | Apple notarization | Notarization is skipped; the cask releases the app from quarantine and says so, and the release notes explain the ZIP's first launch |
 | `TAP_DISPATCH_TOKEN` | Starting the tap's update immediately after a release | The tap's hourly schedule publishes the release instead, up to an hour later |
 
 Releasing needs no token beyond the built-in `GITHUB_TOKEN`, and deliberately

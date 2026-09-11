@@ -176,9 +176,11 @@ jobs:
           gh release view "$TAG" --json body --jq .body >"$RUNNER_TEMP/notes.md"
           {
             printf '\n---\n\n'
-            printf 'This build is not notarized by Apple. '
-            printf 'If macOS blocks the first launch, open System Settings → '
-            printf 'Privacy & Security → Open Anyway after attempting to open the app.\n'
+            printf 'This build is not notarized by Apple. Installing with '
+            printf '`brew install --cask` needs nothing extra: the cask clears the '
+            printf 'quarantine flag. After unzipping the archive by hand, run '
+            printf '`xattr -dr com.apple.quarantine /Applications/prtoolbar.app`, or '
+            printf 'open the app and use System Settings → Privacy & Security → Open Anyway.\n'
           } >>"$RUNNER_TEMP/notes.md"
           gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
 
