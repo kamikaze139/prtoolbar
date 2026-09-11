@@ -17,10 +17,34 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      SOURCE: kamikaze139/prtoolbar
       TAP_REPOSITORY: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      # Deliberately not a copy checked into the tap. The tap was bootstrapped
+      # with one, nothing kept it in step with the source, and v0.1.3 shipped a
+      # cask rendered by a renderer three fixes out of date. Taking the scripts
+      # from the release being published means a cask fix reaches users with
+      # that release. The tap already runs this source's binary, so running its
+      # renderer widens no trust.
+      - name: Fetch the publishing scripts from the release being published
+        run: |
+          set -euo pipefail
+          # sync_homebrew.py resolves the release again for itself. A release
+          # landing between the two reads only means this run publishes it with
+          # the previous release's scripts; the hourly run after it is correct,
+          # and the version gate never lets that go backwards.
+          tag="$(gh release view --repo "$SOURCE" --json tagName --jq .tagName)"
+          mkdir -p "$RUNNER_TEMP/scripts"
+          for script in render_cask.py publish_homebrew.py sync_homebrew.py; do
+            gh api "repos/$SOURCE/contents/scripts/$script?ref=$tag" --jq .content \
+              | base64 -d >"$RUNNER_TEMP/scripts/$script"
+          done
+
       - name: Publish the latest completed app release
-        run: python3 scripts/sync_homebrew.py --source kamikaze139/prtoolbar --repository "$TAP_REPOSITORY"
+        run: |
+          python3 "$RUNNER_TEMP/scripts/sync_homebrew.py" \
+            --source "$SOURCE" --repository "$TAP_REPOSITORY"

@@ -252,11 +252,17 @@ it only delays the `brew upgrade`.
 The source Release workflow uploads `homebrew.json` after attaching the ZIP and
 checksum. This records the tag, archive hash and actual notarization status. The tap validates
 that metadata and the archive checksum before publishing; missing assets are
-retried on the next run. Current and older versions are skipped.
+retried on the next run. Older versions are skipped.
 
-The tap's workflow template is [packaging/homebrew/update.yml](packaging/homebrew/update.yml).
-Its `scripts/` directory contains copies of `render_cask.py`, `publish_homebrew.py`
-and `sync_homebrew.py`; copy relevant changes there when modifying the tooling.
+The tap's workflow template is [packaging/homebrew/update.yml](packaging/homebrew/update.yml),
+and the tap needs only that file. It downloads `render_cask.py`,
+`publish_homebrew.py` and `sync_homebrew.py` from this repository at the tag it
+is publishing and runs those, so a fix to the cask ships with the release that
+contains it. The tap previously kept its own copies, which silently went three
+versions out of date; nothing is copied there by hand any more.
+
+Because the cask, not the version number, decides whether to publish, re-running
+the tap's workflow on the current release republishes a cask that drifted.
 Apple signing and notarization remain optional.
 
 No token beyond the built-in `GITHUB_TOKEN` is needed for a release-plz tag to

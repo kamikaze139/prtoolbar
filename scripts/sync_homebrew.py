@@ -14,9 +14,17 @@ import tempfile
 from pathlib import Path
 
 from publish_homebrew import publish, run, version_tuple
+from render_cask import render
 
 
 def should_update(current_cask: str | None, tag: str) -> bool:
+    """True unless the tap already holds a newer release than this tag.
+
+    The tag's own version is not a stop: the scripts rendering the cask come
+    from the release, so re-running the same release is how a fix to the cask
+    itself reaches users. main() compares the rendered cask and stops there
+    when nothing actually changed.
+    """
     if not tag.startswith("v"):
         raise ValueError("expected a stable vX.Y.Z tag")
     version = version_tuple(tag[1:])
@@ -25,7 +33,7 @@ def should_update(current_cask: str | None, tag: str) -> bool:
     match = re.search(r'^\s*version "([^"]+)"', current_cask, re.MULTILINE)
     if not match:
         raise ValueError("existing cask has no stable version")
-    return version > version_tuple(match[1])
+    return version >= version_tuple(match[1])
 
 
 def notarization_status(metadata: dict, tag: str, archive: Path) -> bool:
@@ -43,8 +51,9 @@ def main() -> None:
     args = parser.parse_args()
     tag = run("gh", "release", "view", "--repo", args.source, "--json", "tagName", "--jq", ".tagName")
     cask_path = Path("Casks/prtoolbar.rb")
-    if not should_update(cask_path.read_text() if cask_path.exists() else None, tag):
-        print("The tap already contains this release or a newer one.")
+    current_cask = cask_path.read_text() if cask_path.exists() else None
+    if not should_update(current_cask, tag):
+        print("The tap already contains a newer release.")
         return
 
     with tempfile.TemporaryDirectory(prefix="prtoolbar-sync-") as directory:
@@ -55,7 +64,14 @@ def main() -> None:
         run("gh", "release", "download", tag, "--repo", args.source, "--dir", directory,
             "--pattern", archive, "--pattern", f"{archive}.sha256", "--pattern", "homebrew.json")
         metadata = json.loads((dist / "homebrew.json").read_text())
-        publish(tag, args.repository, dist, notarized=notarization_status(metadata, tag, dist / archive))
+        notarized = notarization_status(metadata, tag, dist / archive)
+        # The published cask, not the version, decides. That is what makes the
+        # hourly run self-healing: a renderer fix in the same release rewrites
+        # the cask here instead of waiting for someone to bump a version.
+        if render(tag, args.repository, dist / archive, notarized=notarized) == current_cask:
+            print("The tap already contains this release.")
+            return
+        publish(tag, args.repository, dist, notarized=notarized)
 
 
 if __name__ == "__main__":
