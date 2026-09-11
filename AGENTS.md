@@ -157,17 +157,22 @@ quarantined in one file.** If you find yourself wanting to test something in
 Versioning is automatic. **Do not hand-edit `version` in `Cargo.toml` and do
 not hand-write `CHANGELOG.md`** — `release-plz` owns both.
 
-1. Push to `main`. `release-plz` opens a release PR with the version bump and
-   changelog.
-2. Merge it. That tags `vX.Y.Z` and creates the GitHub release.
+1. Merge anything to `main`. `release-plz` commits the version bump and
+   changelog back to `main` as `chore: release vX.Y.Z`.
+2. It tags `vX.Y.Z` and creates the GitHub release. There is no release PR.
 3. The same run then calls `release.yml`, which builds the universal `.app`,
    signs it and attaches it.
 
-Configuration is in `release-plz.toml`. The app is never published to
-crates.io (`publish = false`), so `git_only = true` makes `release-plz` derive
-the last released version from the `v*` git tags instead of the crates.io
-index. The one manual step is cutting `1.0.0`: set it by hand once, then
-automation resumes.
+Every merge releases, so `feat:` gives a minor bump and every other type gives
+a patch. Write the commit message for the changelog: it is the release notes.
+
+Configuration is in `release-plz.toml`. The app is never published to a
+registry (`publish = false` there), so `git_only = true` makes `release-plz`
+derive the last released version from the `v*` git tags instead of the
+crates.io index. `Cargo.toml` uses `publish = ["never-published"]` rather than
+`publish = false` on purpose — see the comment there, and do not "simplify" it.
+The one manual step is cutting `1.0.0`: set it by hand once, then automation
+resumes.
 
 ## CI
 

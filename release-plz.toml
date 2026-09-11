@@ -1,20 +1,24 @@
 # Automatic semantic versioning, driven by the Conventional Commits already
 # used in this repo.
 #
-# On every push to main, release-plz opens (or updates) a "release" PR that
-# bumps the version in Cargo.toml/Cargo.lock and writes CHANGELOG.md. Merging
-# that PR tags the commit `vX.Y.Z` and creates the GitHub release, and the same
-# workflow run then calls .github/workflows/release.yml to attach prtoolbar.app.
+# Every push to main releases. release-plz bumps the version in
+# Cargo.toml/Cargo.lock and writes CHANGELOG.md; the workflow commits that
+# straight back to main, tags it `vX.Y.Z`, creates the GitHub release, and then
+# calls .github/workflows/release.yml to attach prtoolbar.app. No release PR,
+# no manual step.
 
 [workspace]
-# prtoolbar is an app, not a library: it never goes to crates.io, and
-# cargo-semver-checks has no public API to check.
+# Never publish to a registry, and skip cargo-semver-checks: prtoolbar is an
+# app with no public API. This is the switch that puts release-plz in git-only
+# mode, where it just tags and creates the GitHub release. Note that the
+# matching switch in Cargo.toml is a restricted registry list, not
+# `publish = false` — see the comment there.
 publish = false
 semver_check = false
 
 # The crate is never published, so the crates.io index can't tell release-plz
 # what was last released: without this it treats every run as the unreleased
-# first release, keeps proposing the current version, and opens no release PR.
+# first release, keeps proposing the current version, and never releases.
 # git_only makes it read the last release from the `v*` git tags instead.
 git_only = true
 
@@ -23,30 +27,34 @@ git_tag_name = "v{{ version }}"
 git_release_enable = true
 git_release_draft = false
 
-# Cut a release only when the release PR is merged, not on every push.
-release_always = false
+# There is no release PR to merge any more: release whenever the version in
+# Cargo.toml is ahead of the newest `v*` tag. `release_commits` is deliberately
+# not set, so every commit counts and every push to main cuts a release.
+release_always = true
 
 # While the version is 0.x, cargo's default would map `feat:` to a patch bump.
 # For an end-user app the intuitive mapping is better: feat -> minor.
 # Breaking changes stay a minor bump until someone deliberately cuts 1.0.0.
 features_always_increment_minor = true
 
-pr_labels = ["release"]
-
 [changelog]
 protect_breaking_commits = true
 
-# Which commit types reach the changelog, and in what order. Types marked
-# `skip` still land in git history but do not, on their own, cut a release.
+# Which commits reach the changelog, and in what order. First match wins.
+#
+# Every type is listed on purpose. Since every push cuts a release, a type that
+# is skipped here would produce a release whose notes are empty — the bump has
+# to be explained by something. The only thing filtered out is the workflow's
+# own release commit, which is not news.
 commit_parsers = [
+  { message = "^chore: release", skip = true },
   { message = "^feat", group = "Added" },
   { message = "^fix", group = "Fixed" },
   { message = "^perf", group = "Performance" },
   { message = "^refactor", group = "Changed" },
   { message = "^docs", group = "Documentation" },
-  { message = "^test", skip = true },
-  { message = "^ci", skip = true },
-  { message = "^build", skip = true },
-  { message = "^chore", skip = true },
-  { message = "^style", skip = true },
+  { message = "^test", group = "Tests" },
+  { message = "^(ci|build)", group = "Build and CI" },
+  { message = "^(chore|style)", group = "Maintenance" },
+  { message = ".*", group = "Other" },
 ]

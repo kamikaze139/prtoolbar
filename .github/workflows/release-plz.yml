@@ -1,16 +1,20 @@
 name: Release-plz
 
-# Semantic versioning from Conventional Commits. See release-plz.toml.
+# Fully automatic releases, driven by the Conventional Commits in this repo.
+# See release-plz.toml for what bumps what.
 #
-# Token: the built-in GITHUB_TOKEN is enough to cut a release. GitHub refuses
-# to start a workflow run from an event its own token caused, so the `bundle`
-# job below calls .github/workflows/release.yml directly instead of relying on
-# the tag push to trigger it.
+# Every push to main cuts a release. `release-plz update` rewrites Cargo.toml,
+# Cargo.lock and CHANGELOG.md in place; the new version is committed straight
+# back to main, tagged `vX.Y.Z`, released, and the app bundle is attached.
+# No release PR, nothing to click.
 #
-# The one thing GITHUB_TOKEN cannot do is run CI on the release PR that
-# `release-pr` opens. Set a fine-grained PAT as the RELEASE_PLZ_TOKEN secret
-# (contents: write, pull-requests: write) if you want that PR checked before
-# you merge it; closing and reopening the PR by hand also works.
+# Two GITHUB_TOKEN quirks shape this file, and both help here:
+#   - GitHub refuses to start a workflow run from a push its own token made,
+#     so the bump commit below cannot re-trigger this workflow. Do NOT swap in
+#     a PAT: since every push releases, the release commit would release again,
+#     for ever.
+#   - For the same reason the tag push triggers nothing, so the `bundle` job
+#     calls .github/workflows/release.yml directly.
 
 on:
   push:
@@ -25,26 +29,72 @@ concurrency:
 
 jobs:
   release:
-    name: tag and create the GitHub release
+    name: bump, tag and create the GitHub release
     runs-on: ubuntu-latest
     permissions:
       contents: write
     outputs:
-      released: ${{ steps.release-plz.outputs.releases_created }}
-      tag: ${{ steps.release-plz.outputs.releases_created == 'true' && fromJSON(steps.release-plz.outputs.releases)[0].tag || '' }}
+      released: ${{ steps.release.outputs.released }}
+      tag: ${{ steps.release.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
-          # release-plz compares against every previous tag.
+          # release-plz works out the last release from the `v*` tags.
           fetch-depth: 0
-          token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
       - uses: dtolnay/rust-toolchain@stable
-      - uses: release-plz/action@v0.5
-        id: release-plz
+      - uses: taiki-e/install-action@v2
         with:
-          command: release
+          tool: release-plz@0.3
+
+      - name: Apply the version bump and changelog entry
+        id: update
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          crate_version() { sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1; }
+          before="$(crate_version)"
+          release-plz update --forge github --git-token "$GITHUB_TOKEN"
+          version="$(crate_version)"
+          # Normally every push bumps. The exception is a version already ahead
+          # of the tags — a hand-set 1.0.0, or a bump whose release failed —
+          # where update only touches the changelog. The release step below
+          # picks those up, so there is nothing to commit here.
+          if [ "$before" = "$version" ]; then
+            echo "No bump: staying on $before."
+            git checkout -- .
+            exit 0
+          fi
+          echo "Bumping $before -> $version."
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          # Kept out of the changelog by release-plz.toml's commit parsers.
+          # It cannot re-trigger this workflow either: see the top of the file.
+          git commit -m "chore: release v${version}"
+          git push origin HEAD:main
+
+      - name: Tag and create the GitHub release
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Unconditional on purpose. Besides the bump just committed, this is
+          # what picks up a version set by hand in Cargo.toml (cutting 1.0.0)
+          # and what recovers a bump whose release failed. release_always = true
+          # lets it release any version that has no `v*` tag yet.
+          output="$(release-plz release --forge github --git-token "$GITHUB_TOKEN" -o json)"
+          echo "$output"
+          tag="$(echo "$output" | jq -r '.releases[0].tag // ""')"
+          if [ -z "$tag" ]; then
+            echo "Nothing to release."
+            echo "released=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Released $tag."
+          echo "released=true" >>"$GITHUB_OUTPUT"
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
 
   bundle:
     name: attach prtoolbar.app to the release
@@ -58,21 +108,3 @@ jobs:
     with:
       tag: ${{ needs.release.outputs.tag }}
     secrets: inherit
-
-  release-pr:
-    name: open the version-bump PR
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: release-plz/action@v0.5
-        with:
-          command: release-pr
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN || secrets.GITHUB_TOKEN }}
