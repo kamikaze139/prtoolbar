@@ -158,8 +158,10 @@ to merge:
    universal `prtoolbar.app`, signs it, and attaches the zip and its SHA-256 to
    that release. It is called directly rather than triggered by the tag push,
    because GitHub will not start a run from a tag pushed with `GITHUB_TOKEN`.
-4. The public Homebrew tap checks for new releases hourly, copies the completed
-   archive, and updates its cask. Users receive it through `brew upgrade`.
+4. The same run then asks the public Homebrew tap to publish, and the tap
+   copies the completed archive and updates its cask. Users receive it through
+   `brew upgrade`. The tap also polls hourly, so a release still reaches it
+   without that nudge.
 
 Because every merge ships a build, every commit type appears in the changelog —
 a release whose notes were empty would leave its version bump unexplained. The
@@ -193,11 +195,16 @@ All of these are optional. The table says what degrades without each one.
 |---|---|---|
 | `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGNING_IDENTITY` | Developer ID signing | The app is ad-hoc signed |
 | `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | Apple notarization | Notarization is skipped; release notes and the cask explain the first-launch approval |
+| `TAP_DISPATCH_TOKEN` | Starting the tap's update immediately after a release | The tap's hourly schedule publishes the release instead, up to an hour later |
 
 Releasing needs no token beyond the built-in `GITHUB_TOKEN`, and deliberately
 so: GitHub will not start a workflow run from a push its own token made, which
 is exactly what stops the release commit from re-triggering the release. Do not
 swap in a personal access token.
+
+`TAP_DISPATCH_TOKEN` is the one exception, and it is not a release token: it
+only starts a workflow in the tap, and has no access to this repository at all.
+See [Homebrew publishing setup](#homebrew-publishing-setup).
 
 `MACOS_CERTIFICATE_P12` is a base64 encoding of a Developer ID Application
 certificate exported as `.p12`:
@@ -214,12 +221,24 @@ needs repeating.
 
 The public [kamikaze139/homebrew-tap](https://github.com/kamikaze139/homebrew-tap)
 repository hosts the app ZIP, checksum and `Casks/prtoolbar.rb`. Its **Update
-prtoolbar** workflow checks the public source repository's latest release hourly.
-It can also be run manually from the tap's Actions tab for an immediate update.
+prtoolbar** workflow publishes the source repository's latest release. Three
+things start it: the Release workflow's last step, an hourly schedule, and the
+Run workflow button on the tap's Actions tab.
 
-The tap uses its own built-in `GITHUB_TOKEN` with **Contents: write**. No personal
-access token, source-repository variable, or cross-repository secret is needed.
-The source repository must remain public for this setup.
+The tap does all of that publishing with its own built-in `GITHUB_TOKEN` and
+**Contents: write**. The source repository must remain public for this to work.
+
+Starting the tap's workflow from here is the only part that needs a credential,
+because `GITHUB_TOKEN` cannot reach another repository. Set `TAP_DISPATCH_TOKEN`
+to a fine-grained personal access token scoped to the tap alone, with
+**Actions: write** and nothing else. That is enough to press the button and
+nothing more: the token cannot write the cask, cut a release, or touch this
+repository.
+
+Leaving the secret unset is a supported configuration, not a broken one. The
+release then waits for the tap's next hourly run. The same fallback covers a
+dispatch that fails, so a missing or expired token never fails a release —
+it only delays the `brew upgrade`.
 
 The source Release workflow uploads `homebrew.json` after attaching the ZIP and
 checksum. This records the tag, archive hash and actual notarization status. The tap validates
