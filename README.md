@@ -153,14 +153,19 @@ The flow is three steps, all in GitHub Actions:
    `Cargo.toml` and `Cargo.lock` and writes `CHANGELOG.md`.
 2. Merge that PR. `release-plz` tags the merge commit `vX.Y.Z` and creates the
    GitHub release, using the changelog section as the body.
-3. The new tag triggers the **Release** workflow, which builds the universal
-   `prtoolbar.app`, signs it, and attaches the zip and its SHA-256 to that
-   release.
+3. The same workflow run then calls the **Release** workflow, which builds the
+   universal `prtoolbar.app`, signs it, and attaches the zip and its SHA-256 to
+   that release. It is called directly rather than triggered by the tag push,
+   because GitHub will not start a run from a tag pushed with `GITHUB_TOKEN`.
 4. The public Homebrew tap checks for new releases hourly, copies the completed
    archive, and updates its cask. Users receive it through `brew upgrade`.
 
 Behaviour is configured in `release-plz.toml`. prtoolbar is an application, not
-a library, so it is never published to crates.io (`publish = false`).
+a library, so it is never published to crates.io (`publish = false`). Because
+nothing is published, `git_only = true` tells `release-plz` to read the last
+released version from the `v*` git tags; without it, it consults the crates.io
+index, never finds the crate, concludes the current version is still an
+unreleased first release, and opens no release PR at all.
 
 To cut `1.0.0`, or to make breaking changes bump the major version from then
 on, set the version in `Cargo.toml` to `1.0.0` once by hand and merge; the
@@ -172,14 +177,16 @@ All of these are optional. The table says what degrades without each one.
 
 | Secret | Used for | If unset |
 |---|---|---|
-| `RELEASE_PLZ_TOKEN` | Opening the release PR and pushing the tag | Falls back to `GITHUB_TOKEN`. Releases still happen, but GitHub will not start the Release workflow from a tag its own token pushed, so the app has to be built by hand |
+| `RELEASE_PLZ_TOKEN` | Opening the release PR and pushing the tag | Falls back to `GITHUB_TOKEN`. Releases and app builds still happen; the only loss is that CI does not run on the release PR |
 | `MACOS_CERTIFICATE_P12`, `MACOS_CERTIFICATE_PASSWORD`, `MACOS_SIGNING_IDENTITY` | Developer ID signing | The app is ad-hoc signed |
 | `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` | Apple notarization | Notarization is skipped; release notes and the cask explain the first-launch approval |
 
 `RELEASE_PLZ_TOKEN` is a fine-grained personal access token scoped to this
 repository with **Contents: read and write** and **Pull requests: read and
 write**. It exists only to work around GitHub's rule that events created with
-the built-in `GITHUB_TOKEN` do not trigger further workflows.
+the built-in `GITHUB_TOKEN` do not trigger further workflows — here, that the
+release PR opens without CI running on it. Closing and reopening that PR by
+hand starts CI too.
 
 `MACOS_CERTIFICATE_P12` is a base64 encoding of a Developer ID Application
 certificate exported as `.p12`:
@@ -213,9 +220,8 @@ Its `scripts/` directory contains copies of `render_cask.py`, `publish_homebrew.
 and `sync_homebrew.py`; copy relevant changes there when modifying the tooling.
 Apple signing and notarization remain optional.
 
-The optional `RELEASE_PLZ_TOKEN` or a manually dispatched Release workflow is
-still needed to start a build from a release-plz tag. The first release uses the
-existing `0.1.0` package version.
+No token beyond the built-in `GITHUB_TOKEN` is needed for a release-plz tag to
+produce a build. The first release uses the existing `0.1.0` package version.
 
 Validation runs in CI and locally with:
 
