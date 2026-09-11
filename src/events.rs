@@ -1,0 +1,18 @@
+//! Messages delivered to the main thread's event loop.
+
+use std::collections::HashMap;
+
+use image::RgbaImage;
+
+use crate::model::PullRequest;
+
+/// Everything that can wake the main thread.
+#[derive(Debug)]
+pub enum AppEvent {
+    /// A refresh succeeded.
+    Loaded { prs: Vec<PullRequest>, total: usize },
+    /// A refresh failed; the message is shown in the menu.
+    Failed(String),
+    /// Newly downloaded avatars keyed by URL.
+    Avatars(HashMap<String, RgbaImage>),
+}

@@ -1,0 +1,50 @@
+{
+  "data": {
+    "search": {
+      "issueCount": 2,
+      "nodes": [
+        {
+          "number": 42,
+          "title": "Fix the flaky integration test",
+          "url": "https://github.com/acme/widgets/pull/42",
+          "isDraft": false,
+          "repository": { "nameWithOwner": "acme/widgets" },
+          "reviewDecision": "APPROVED",
+          "commits": {
+            "nodes": [
+              { "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }
+            ]
+          },
+          "reviewRequests": {
+            "nodes": [
+              { "requestedReviewer": { "login": "alice", "avatarUrl": "https://avatars.githubusercontent.com/u/1?s=64&v=4" } },
+              { "requestedReviewer": { "name": "platform-team", "avatarUrl": "https://avatars.githubusercontent.com/t/9?s=64&v=4" } },
+              { "requestedReviewer": null }
+            ]
+          },
+          "latestReviews": {
+            "nodes": [
+              { "state": "APPROVED", "author": { "login": "bob", "avatarUrl": "https://avatars.githubusercontent.com/u/2?s=64&v=4" } },
+              { "state": "DISMISSED", "author": { "login": "dave", "avatarUrl": "https://avatars.githubusercontent.com/u/4?s=64&v=4" } }
+            ]
+          }
+        },
+        {
+          "number": 3,
+          "title": "WIP: rewrite everything",
+          "url": "https://github.com/acme/tools/pull/3",
+          "isDraft": true,
+          "repository": { "nameWithOwner": "acme/tools" },
+          "reviewDecision": null,
+          "commits": {
+            "nodes": [
+              { "commit": { "statusCheckRollup": null } }
+            ]
+          },
+          "reviewRequests": { "nodes": [] },
+          "latestReviews": { "nodes": [] }
+        }
+      ]
+    }
+  }
+}

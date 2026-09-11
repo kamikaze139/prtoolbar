@@ -1,0 +1,46 @@
+# Automatic semantic versioning, driven by the Conventional Commits already
+# used in this repo.
+#
+# On every push to main, release-plz opens (or updates) a "release" PR that
+# bumps the version in Cargo.toml/Cargo.lock and writes CHANGELOG.md. Merging
+# that PR tags the commit `vX.Y.Z` and creates the GitHub release; the tag push
+# then triggers .github/workflows/release.yml, which attaches prtoolbar.app.
+
+[workspace]
+# prtoolbar is an app, not a library: it never goes to crates.io, and
+# cargo-semver-checks has no public API to check.
+publish = false
+semver_check = false
+
+git_tag_enable = true
+git_tag_name = "v{{ version }}"
+git_release_enable = true
+git_release_draft = false
+
+# Cut a release only when the release PR is merged, not on every push.
+release_always = false
+
+# While the version is 0.x, cargo's default would map `feat:` to a patch bump.
+# For an end-user app the intuitive mapping is better: feat -> minor.
+# Breaking changes stay a minor bump until someone deliberately cuts 1.0.0.
+features_always_increment_minor = true
+
+pr_labels = ["release"]
+
+[changelog]
+protect_breaking_commits = true
+
+# Which commit types reach the changelog, and in what order. Types marked
+# `skip` still land in git history but do not, on their own, cut a release.
+commit_parsers = [
+  { message = "^feat", group = "Added" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^docs", group = "Documentation" },
+  { message = "^test", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^build", skip = true },
+  { message = "^chore", skip = true },
+  { message = "^style", skip = true },
+]
