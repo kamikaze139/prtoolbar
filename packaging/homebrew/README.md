@@ -50,7 +50,9 @@ installer definition and public downloads.
 
 ## Maintenance
 
-The **Update prtoolbar** workflow checks the public
-[kamikaze139/prtoolbar](https://github.com/kamikaze139/prtoolbar) release hourly.
-Run it manually from Actions to update immediately. It uses this repository's
-built-in GitHub Actions token; no personal access token is required.
+The **Update prtoolbar** workflow publishes the latest public
+[kamikaze139/prtoolbar](https://github.com/kamikaze139/prtoolbar) release. That
+repository starts it as soon as a release finishes; an hourly schedule catches
+anything the notification missed, and Run workflow in Actions publishes on
+demand. It uses this repository's built-in GitHub Actions token to do the
+publishing; no personal access token is required here.

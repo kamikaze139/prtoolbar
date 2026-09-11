@@ -190,3 +190,21 @@ jobs:
           set -euo pipefail
           python3 -c 'import hashlib, json, os; from pathlib import Path; print(json.dumps({"tag": os.environ["TAG"], "notarized": os.environ["NOTARIZED"] == "true", "sha256": hashlib.sha256(Path(os.environ["ARCHIVE"]).read_bytes()).hexdigest()}))' > homebrew.json
           gh release upload "$TAG" homebrew.json --clobber
+
+      # Last, because the tap copies whatever the newest release offers: it
+      # needs the zip, the checksum and homebrew.json already attached.
+      - name: Ask the Homebrew tap to publish this release
+        env:
+          GH_TOKEN: ${{ secrets.TAP_DISPATCH_TOKEN }}
+          TAP: kamikaze139/homebrew-tap
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "No TAP_DISPATCH_TOKEN: the tap's hourly run picks up $TAG."
+            exit 0
+          fi
+          # Only starts the tap's workflow; the tap publishes with its own
+          # token. Never fail a finished release over this, because the tap's
+          # schedule still catches the release within the hour.
+          gh workflow run update.yml --repo "$TAP" \
+            || echo "::warning::Could not start the tap update; its hourly run will retry."
