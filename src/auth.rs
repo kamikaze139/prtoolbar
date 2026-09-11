@@ -49,6 +49,18 @@ mod tests {
     }
 
     #[test]
+    fn gh_is_not_run_when_the_env_var_is_set() {
+        let consulted = std::cell::Cell::new(false);
+        let token = resolve_from(Some("ghp_env".into()), || {
+            consulted.set(true);
+            None
+        })
+        .unwrap();
+        assert_eq!(token, "ghp_env");
+        assert!(!consulted.get(), "no subprocess is spawned needlessly");
+    }
+
+    #[test]
     fn empty_env_falls_back_to_gh() {
         let token = resolve_from(Some("   ".into()), || Some("ghp_cli".into())).unwrap();
         assert_eq!(token, "ghp_cli");

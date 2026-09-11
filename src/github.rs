@@ -4,7 +4,9 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 use ureq::Agent;
 
-use crate::model::{CiState, PullRequest, ReviewDecision, ReviewState, Reviewer, merge_reviewers};
+use crate::model::{
+    CiState, PullRequest, ReviewDecision, ReviewState, Reviewer, StackMembership, merge_reviewers,
+};
 
 const ENDPOINT: &str = "https://api.github.com/graphql";
 
@@ -18,6 +20,7 @@ query {
         number title url isDraft
         repository { nameWithOwner }
         reviewDecision
+        stackEntry { position stack { number size } }
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
         reviewRequests(first: 10) { nodes { requestedReviewer {
           ... on User { login avatarUrl(size: 64) }
@@ -133,6 +136,19 @@ struct PrNode {
     commits: Nodes<CommitNode>,
     review_requests: Nodes<ReviewRequest>,
     latest_reviews: Nodes<Review>,
+    stack_entry: Option<StackEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StackEntry {
+    position: u64,
+    stack: Option<Stack>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Stack {
+    number: u64,
+    size: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -225,6 +241,13 @@ impl From<PrNode> for PullRequest {
             ci,
             decision: review_decision(node.review_decision.as_deref()),
             reviewers: merge_reviewers(requested, reviewed),
+            stack: node.stack_entry.and_then(|entry| {
+                entry.stack.map(|stack| StackMembership {
+                    number: stack.number,
+                    position: entry.position,
+                    size: stack.size,
+                })
+            }),
         }
     }
 }
@@ -262,6 +285,30 @@ mod tests {
     use crate::model::{CiState, ReviewDecision, ReviewState};
 
     const FIXTURE: &str = include_str!("../tests/fixtures/search_response.json");
+
+    #[test]
+    fn stack_metadata_preserves_the_full_stack_size() {
+        let mut response: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+        response["data"]["search"]["nodes"][0]["stackEntry"] = serde_json::json!({
+            "position": 4, "stack": { "number": 7, "size": 20 }
+        });
+        let (prs, _) = parse_response(&response.to_string()).unwrap();
+        assert_eq!(
+            prs[0].stack,
+            Some(StackMembership {
+                number: 7,
+                position: 4,
+                size: 20
+            })
+        );
+        assert_eq!(prs[1].stack, None);
+
+        response["data"]["search"]["nodes"][0]["stackEntry"] = serde_json::json!({
+            "position": 4, "stack": null
+        });
+        let (prs, _) = parse_response(&response.to_string()).unwrap();
+        assert_eq!(prs[0].stack, None);
+    }
 
     #[test]
     fn parses_fixture_into_pull_requests() {
@@ -332,6 +379,45 @@ mod tests {
         assert_eq!(ci_state("ERROR"), CiState::Failure);
         assert_eq!(ci_state("PENDING"), CiState::Pending);
         assert_eq!(ci_state("EXPECTED"), CiState::Pending);
+    }
+
+    #[test]
+    fn review_decision_mapping() {
+        assert_eq!(review_decision(Some("APPROVED")), ReviewDecision::Approved);
+        assert_eq!(
+            review_decision(Some("CHANGES_REQUESTED")),
+            ReviewDecision::ChangesRequested
+        );
+        assert_eq!(
+            review_decision(Some("REVIEW_REQUIRED")),
+            ReviewDecision::Required
+        );
+        assert_eq!(review_decision(None), ReviewDecision::None);
+        assert_eq!(
+            review_decision(Some("SOMETHING_NEW")),
+            ReviewDecision::None,
+            "an unknown decision must not block the PR"
+        );
+    }
+
+    #[test]
+    fn only_submitted_reviews_become_reviewer_states() {
+        assert_eq!(review_state("APPROVED"), Some(ReviewState::Approved));
+        assert_eq!(
+            review_state("CHANGES_REQUESTED"),
+            Some(ReviewState::ChangesRequested)
+        );
+        assert_eq!(review_state("COMMENTED"), Some(ReviewState::Commented));
+        assert_eq!(review_state("DISMISSED"), None, "dismissed is not shown");
+        assert_eq!(review_state("PENDING"), None, "unsubmitted is not shown");
+    }
+
+    #[test]
+    fn the_total_is_the_search_count_not_the_node_count() {
+        let body = r#"{"data":{"search":{"issueCount":137,"nodes":[]}}}"#;
+        let (prs, total) = parse_response(body).unwrap();
+        assert!(prs.is_empty());
+        assert_eq!(total, 137, "the count past the 50-PR cap stays truthful");
     }
 
     #[test]

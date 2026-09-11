@@ -4,7 +4,6 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::Duration;
 
-use tao::event_loop::EventLoopProxy;
 use ureq::Agent;
 
 use crate::avatars::AvatarCache;
@@ -24,11 +23,14 @@ pub enum Command {
 
 /// Start the refresh thread. Dropping the returned sender stops it after the
 /// current cycle.
-pub fn spawn(proxy: EventLoopProxy<AppEvent>, interval: Duration) -> Sender<Command> {
+pub fn spawn(
+    deliver: impl Fn(AppEvent) -> bool + Send + 'static,
+    interval: Duration,
+) -> Sender<Command> {
     let (tx, rx) = mpsc::channel();
     thread::Builder::new()
         .name("refresh".into())
-        .spawn(move || run(&proxy, &rx, interval))
+        .spawn(move || run(&deliver, &rx, interval))
         .expect("spawn refresh thread");
     tx
 }
@@ -53,7 +55,7 @@ pub fn http_agent(timeout: Duration) -> Agent {
         .new_agent()
 }
 
-fn run(proxy: &EventLoopProxy<AppEvent>, rx: &Receiver<Command>, interval: Duration) {
+fn run(deliver: &impl Fn(AppEvent) -> bool, rx: &Receiver<Command>, interval: Duration) {
     let github = http_agent(GITHUB_TIMEOUT);
     let cdn = http_agent(AVATAR_TIMEOUT);
     let mut cache = AvatarCache::default();
@@ -64,30 +66,24 @@ fn run(proxy: &EventLoopProxy<AppEvent>, rx: &Receiver<Command>, interval: Durat
         match result {
             Ok((prs, total)) => {
                 let total = usize::try_from(total).unwrap_or(usize::MAX);
-                if proxy
-                    .send_event(AppEvent::Loaded {
-                        prs: prs.clone(),
-                        total,
-                    })
-                    .is_err()
-                {
+                if !deliver(AppEvent::Loaded {
+                    prs: prs.clone(),
+                    total,
+                }) {
                     return;
                 }
                 for pr in &prs {
                     let urls: Vec<String> =
                         pr.reviewers.iter().map(|r| r.avatar_url.clone()).collect();
                     let fresh = cache.fetch_missing(&cdn, urls);
-                    if !fresh.is_empty() && proxy.send_event(AppEvent::Avatars(fresh)).is_err() {
+                    if !fresh.is_empty() && !deliver(AppEvent::Avatars(fresh)) {
                         return;
                     }
                 }
             }
             Err(err) => {
                 log::warn!("refresh failed: {err:#}");
-                if proxy
-                    .send_event(AppEvent::Failed(format!("{err:#}")))
-                    .is_err()
-                {
+                if !deliver(AppEvent::Failed(format!("{err:#}"))) {
                     return;
                 }
             }
@@ -115,5 +111,20 @@ mod tests {
         assert_eq!(interval_from_env(Some("3")), Duration::from_secs(15));
         assert_eq!(interval_from_env(Some("abc")), Duration::from_secs(60));
         assert_eq!(interval_from_env(Some("")), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn interval_trims_whitespace_and_rejects_non_positive_values() {
+        assert_eq!(interval_from_env(Some(" 90 ")), Duration::from_secs(90));
+        assert_eq!(
+            interval_from_env(Some("-5")),
+            Duration::from_secs(60),
+            "a negative value is not a u64, so the default applies"
+        );
+        assert_eq!(
+            interval_from_env(Some("0")),
+            Duration::from_secs(15),
+            "zero is clamped to the minimum, never busy-loops"
+        );
     }
 }

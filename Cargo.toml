@@ -2,8 +2,8 @@
 name = "prtoolbar"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
-description = "macOS menu bar app that lists your open GitHub pull requests"
+rust-version = "1.88"
+description = "A tiny macOS menu bar app that lists your open GitHub pull requests"
 license = "MIT"
 repository = "https://github.com/kamikaze139/prtoolbar"
 publish = false
@@ -11,18 +11,20 @@ publish = false
 [dependencies]
 anyhow = "1"
 env_logger = "0.11"
+block2 = "0.6"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 jiff = "0.2"
 log = "0.4"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSApplication", "NSRunningApplication", "objc2-core-foundation", "NSScreen", "NSStatusItem", "NSStatusBar", "NSStatusBarButton", "NSView", "NSWindow", "NSResponder", "NSPopover", "NSViewController", "NSOutlineView", "NSTableView", "NSTableColumn", "NSTableHeaderView", "NSTableCellView", "NSControl", "NSCell", "NSText", "NSTextField", "NSButton", "NSScrollView", "NSClipView", "NSFont", "NSColor", "NSImage", "NSImageView", "NSEvent", "NSGraphics", "NSUserInterfaceItemIdentification", "NSParagraphStyle"] }
+objc2-foundation = { version = "0.3", features = ["block2"] }
 open = "5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tao = "0.37"
-tray-icon = "0.24"
 ureq = { version = "3", features = ["json"] }
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_debug_implementations = "warn"
 unused_qualifications = "warn"
 
@@ -43,3 +45,4 @@ name = "prtoolbar"
 identifier = "de.kaminski.prtoolbar"
 osx_minimum_system_version = "12.0"
 osx_info_plist_exts = ["bundle/Info.plist.ext"]
+resources = ["LICENSE", "THIRD-PARTY-NOTICES.md"]

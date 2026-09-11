@@ -3,15 +3,12 @@
 use std::collections::HashMap;
 
 use image::RgbaImage;
-use tray_icon::menu::MenuEvent;
 
 use crate::model::PullRequest;
 
 /// Everything that can wake the main thread.
 #[derive(Debug)]
 pub enum AppEvent {
-    /// A menu item was activated.
-    Menu(MenuEvent),
     /// A refresh succeeded.
     Loaded { prs: Vec<PullRequest>, total: usize },
     /// A refresh failed; the message is shown in the menu.

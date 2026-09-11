@@ -40,6 +40,16 @@ pub struct Reviewer {
     pub state: ReviewState,
 }
 
+/// Native GitHub stack membership. Position is one-based, starting at the base.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StackMembership {
+    /// Stack number, unique within the repository.
+    pub number: u64,
+    pub position: u64,
+    /// Full stack size, including PRs outside the currently fetched list.
+    pub size: u64,
+}
+
 /// One open pull request authored by the user.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequest {
@@ -52,6 +62,7 @@ pub struct PullRequest {
     pub ci: CiState,
     pub decision: ReviewDecision,
     pub reviewers: Vec<Reviewer>,
+    pub stack: Option<StackMembership>,
 }
 
 /// The single colour shown next to a PR.
@@ -112,6 +123,23 @@ pub struct Snapshot {
     pub error: Option<String>,
 }
 
+impl Snapshot {
+    /// Apply a successful fetch: the new list replaces the old one, and any
+    /// error from an earlier cycle is cleared.
+    pub fn loaded(&mut self, prs: Vec<PullRequest>, total: usize, at: String) {
+        self.prs = prs;
+        self.total = total;
+        self.updated_at = Some(at);
+        self.error = None;
+    }
+
+    /// Apply a failed fetch: show the message but keep the last good list, so
+    /// a transient network blip does not empty the menu.
+    pub fn failed(&mut self, message: String) {
+        self.error = Some(message);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,6 +154,7 @@ mod tests {
             ci,
             decision,
             reviewers: Vec::new(),
+            stack: None,
         }
     }
 
@@ -217,6 +246,46 @@ mod tests {
                 ("bob", ReviewState::Pending),
                 ("carol", ReviewState::Commented),
             ]
+        );
+    }
+
+    #[test]
+    fn a_successful_fetch_replaces_the_list_and_clears_the_error() {
+        let mut snapshot = Snapshot {
+            prs: vec![pr(false, CiState::Success, ReviewDecision::Approved)],
+            total: 1,
+            updated_at: Some("11:00".into()),
+            error: Some("boom".into()),
+        };
+
+        snapshot.loaded(Vec::new(), 0, "12:00".into());
+
+        assert!(
+            snapshot.prs.is_empty(),
+            "the new list wins, even when empty"
+        );
+        assert_eq!(snapshot.total, 0);
+        assert_eq!(snapshot.updated_at.as_deref(), Some("12:00"));
+        assert_eq!(snapshot.error, None, "a success clears the previous error");
+    }
+
+    #[test]
+    fn a_failed_fetch_keeps_the_last_good_list_and_timestamp() {
+        let mut snapshot = Snapshot::default();
+        snapshot.loaded(
+            vec![pr(false, CiState::Success, ReviewDecision::Approved)],
+            9,
+            "12:00".into(),
+        );
+
+        snapshot.failed("GitHub rejected the token (401)".into());
+
+        assert_eq!(snapshot.prs.len(), 1, "the stale list stays on screen");
+        assert_eq!(snapshot.total, 9);
+        assert_eq!(snapshot.updated_at.as_deref(), Some("12:00"));
+        assert_eq!(
+            snapshot.error.as_deref(),
+            Some("GitHub rejected the token (401)")
         );
     }
 
