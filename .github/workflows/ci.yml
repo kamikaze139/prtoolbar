@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -12,8 +13,13 @@ env:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  check:
+  test:
+    name: fmt, clippy, test
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,10 +30,70 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets --all-features --locked
       - run: cargo test --all-features --locked
+      - name: Test Homebrew release tooling
+        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Validate the generated cask with Homebrew
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_ANALYTICS: "1"
+          HOMEBREW_DEVELOPER: "1"
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/prtoolbar-v0.1.0-universal-apple-darwin.zip"
+          printf 'cask validation fixture' > "$archive"
+          python3 scripts/render_cask.py --tag v0.1.0 \
+            --repository example/homebrew-tap --archive "$archive" \
+            --output "$RUNNER_TEMP/prtoolbar.rb"
+          brew ruby -e 'require "cask/cask_loader"; c = Cask::CaskLoader.load(File.read(ARGV.fetch(0))); abort "Wrong cask" unless c.token == "prtoolbar" && c.version.to_s == "0.1.0"' "$RUNNER_TEMP/prtoolbar.rb"
+      # The release build is the slowest step in CI (lto = "thin",
+      # codegen-units = 1) and macOS runners cost ~10x Linux ones, so it is
+      # not worth repeating on every pull request: release.yml builds the
+      # real artifact at tag time. Keep it as a gate on main.
       - run: cargo build --release --locked
+        if: github.event_name != 'pull_request'
+
+  msrv:
+    name: build on the declared MSRV
+    runs-on: macos-latest
+    # A second full macOS compile. An MSRV break is cheap to fix after the
+    # fact and must only be caught before a release, not on every PR.
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read rust-version from Cargo.toml
+        id: msrv
+        run: echo "version=$(sed -n 's/^rust-version *= *"\(.*\)"/\1/p' Cargo.toml)" >>"$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+      - uses: Swatinem/rust-cache@v2
+      # No -D warnings here: an older compiler warns about different things,
+      # and that should not fail the build the way a real MSRV break does.
+      - run: cargo check --all-targets --all-features --locked
+        env:
+          RUSTFLAGS: ""
 
   deny:
+    name: licences and advisories
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks scans every commit, so it needs the whole history.
+          fetch-depth: 0
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.28.0
+        run: |
+          set -euo pipefail
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+      - name: Scan history for committed secrets
+        run: gitleaks git . --redact --no-banner --exit-code 1

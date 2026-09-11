@@ -1,0 +1,178 @@
+name: Release
+
+# Builds prtoolbar.app for the tag release-plz created and attaches it to the
+# GitHub release. Also runnable by hand against any existing tag, which is the
+# fallback when release-plz runs without a PAT (see release-plz.yml).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build, e.g. v0.2.0
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  # Keep both slices in step with [package.metadata.bundle].
+  MACOSX_DEPLOYMENT_TARGET: "12.0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    name: build and attach prtoolbar.app
+    runs-on: macos-latest
+    outputs:
+      notarized: ${{ steps.notarize.outputs.notarized }}
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      APP: target/aarch64-apple-darwin/release/bundle/osx/prtoolbar.app
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check the tag matches Cargo.toml
+        run: |
+          set -euo pipefail
+          crate="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [ "$TAG" != "v${crate}" ]; then
+            echo "::error::tag $TAG does not match Cargo.toml version $crate"
+            exit 1
+          fi
+
+      - name: Build both architectures
+        run: |
+          set -euo pipefail
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+
+      - name: Bundle the app
+        run: |
+          set -euo pipefail
+          cargo install cargo-bundle --locked
+          # --format osx: the app only. The dmg would be built from the
+          # single-architecture binary, before the lipo step below.
+          cargo bundle --release --format osx --target aarch64-apple-darwin
+
+      - name: Make the bundled binary universal
+        run: |
+          set -euo pipefail
+          lipo -create -output "$APP/Contents/MacOS/prtoolbar" \
+            target/aarch64-apple-darwin/release/prtoolbar \
+            target/x86_64-apple-darwin/release/prtoolbar
+          lipo -info "$APP/Contents/MacOS/prtoolbar"
+
+      - name: Sign the app
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CERTIFICATE_P12:-}" ]; then
+            echo "No MACOS_CERTIFICATE_P12 secret: signing ad-hoc."
+            echo "AD_HOC=true" >>"$GITHUB_ENV"
+            codesign --force --options runtime --sign - "$APP"
+          else
+            keychain="$RUNNER_TEMP/signing.keychain-db"
+            password="$(uuidgen)"
+            security create-keychain -p "$password" "$keychain"
+            security set-keychain-settings -lut 21600 "$keychain"
+            security unlock-keychain -p "$password" "$keychain"
+            echo "$CERTIFICATE_P12" | base64 --decode >"$RUNNER_TEMP/cert.p12"
+            security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
+              -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple:,codesign: \
+              -s -k "$password" "$keychain" >/dev/null
+            security list-keychain -d user -s "$keychain" login.keychain-db
+            rm -f "$RUNNER_TEMP/cert.p12"
+            echo "AD_HOC=false" >>"$GITHUB_ENV"
+            codesign --force --options runtime --timestamp \
+              --sign "$SIGNING_IDENTITY" "$APP"
+          fi
+          codesign --verify --strict --verbose=2 "$APP"
+
+      - name: Notarize and staple
+        id: notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo "notarized=false" >>"$GITHUB_OUTPUT"
+          if [ "$AD_HOC" = "true" ] || [ -z "${APPLE_ID:-}" ]; then
+            echo "Skipping notarization: no Developer ID credentials."
+            exit 0
+          fi
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" \
+            --wait
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          spctl --assess --type execute --verbose=2 "$APP"
+          echo "notarized=true" >>"$GITHUB_OUTPUT"
+
+      - name: Zip and checksum
+        run: |
+          set -euo pipefail
+          archive="prtoolbar-${TAG}-universal-apple-darwin.zip"
+          # ditto, not zip: it is the only archiver that preserves the
+          # code signature and the bundle's symlinks.
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "$archive"
+          shasum -a 256 "$archive" >"$archive.sha256"
+          echo "ARCHIVE=$archive" >>"$GITHUB_ENV"
+
+      - name: Attach to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" "$ARCHIVE" "$ARCHIVE.sha256" --clobber
+
+      - name: Warn in the notes when the build is not notarized
+        if: steps.notarize.outputs.notarized != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json body --jq .body >"$RUNNER_TEMP/notes.md"
+          {
+            printf '\n---\n\n'
+            printf 'This build is not notarized by Apple. '
+            printf 'If macOS blocks the first launch, open System Settings → '
+            printf 'Privacy & Security → Open Anyway after attempting to open the app.\n'
+          } >>"$RUNNER_TEMP/notes.md"
+          gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+
+      - name: Publish Homebrew release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTARIZED: ${{ steps.notarize.outputs.notarized }}
+        run: |
+          set -euo pipefail
+          python3 -c 'import hashlib, json, os; from pathlib import Path; print(json.dumps({"tag": os.environ["TAG"], "notarized": os.environ["NOTARIZED"] == "true", "sha256": hashlib.sha256(Path(os.environ["ARCHIVE"]).read_bytes()).hexdigest()}))' > homebrew.json
+          gh release upload "$TAG" homebrew.json --clobber

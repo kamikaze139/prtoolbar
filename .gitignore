@@ -1,3 +1,13 @@
 /target
 *.app
 .DS_Store
+
+# Credentials never belong in the repo; the token is read from the
+# environment or `gh auth token` at runtime. See the Security section
+# of README.md.
+.env
+.env.*
+*.p12
+*.pem
+*.key
+*.mobileprovision
