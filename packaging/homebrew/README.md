@@ -23,8 +23,9 @@ Already signed in with GitHub CLI? Skip the login step. Look for the PR icon
 in your menu bar. Either mouse button opens the list. Click a PR to open GitHub;
 click elsewhere or press Escape to close the popup.
 
-If macOS blocks the first launch of an unnotarized build, try opening the app,
-then go to **System Settings → Privacy & Security → Open Anyway**.
+Builds without Apple Developer ID credentials are ad-hoc signed rather than
+notarized. The cask removes macOS's quarantine flag on install so the app opens
+straight away, which also means Gatekeeper does not verify it for you.
 
 ## Update or remove
 
@@ -42,6 +43,13 @@ brew uninstall --cask prtoolbar
 Download the universal ZIP from [Releases](https://github.com/kamikaze139/homebrew-tap/releases/latest),
 unzip it and move `prtoolbar.app` to Applications. Install [GitHub CLI](https://cli.github.com)
 and sign in with `gh auth login --hostname github.com`, then open the app.
+
+A ZIP downloaded this way is quarantined, so clear it first — Homebrew does this
+step for you:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/prtoolbar.app
+```
 
 Releases use ad-hoc signing by default. Apple Developer ID signing and
 notarization are optional; each release's notes state its notarization status.

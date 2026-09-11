@@ -23,17 +23,32 @@ class CaskTests(unittest.TestCase):
             self.assertIn('depends_on formula: "gh"', cask)
             self.assertIn('app "prtoolbar.app"', cask)
             self.assertNotIn("no_check", cask)
-            self.assertNotIn("xattr", cask)
 
-    def test_first_launch_help_is_only_added_for_unnotarized_builds(self):
+    def test_unnotarized_builds_are_released_from_quarantine_on_install(self):
+        # Ad-hoc signatures have a bare cdhash for a designated requirement, so it changes
+        # every build and Homebrew can never inherit the user's Gatekeeper approval across an
+        # upgrade. Without this the dialog returns on every single release, not just the first.
         with tempfile.TemporaryDirectory(dir=TEST_TMP) as directory:
             archive = Path(directory) / "prtoolbar-v0.2.0-universal-apple-darwin.zip"
             archive.write_bytes(b"release archive")
             cask = render("v0.2.0", "someone/homebrew-tap", archive)
+            self.assertIn("postflight do", cask)
+            self.assertIn('"/usr/bin/xattr"', cask)
+            self.assertIn('"com.apple.quarantine"', cask)
+            self.assertIn('"#{appdir}/prtoolbar.app"', cask)
             self.assertIn("not notarized by Apple", cask)
-            self.assertIn("Open Anyway", cask)
-            notarized = render("v0.2.0", "someone/homebrew-tap", archive, notarized=True)
-            self.assertNotIn("Open Anyway", notarized)
+            # Saying otherwise would send people to a dialog they will never see.
+            self.assertNotIn("Open Anyway", cask)
+
+    def test_notarized_builds_leave_gatekeeper_untouched(self):
+        with tempfile.TemporaryDirectory(dir=TEST_TMP) as directory:
+            archive = Path(directory) / "prtoolbar-v0.2.0-universal-apple-darwin.zip"
+            archive.write_bytes(b"release archive")
+            cask = render("v0.2.0", "someone/homebrew-tap", archive, notarized=True)
+            self.assertNotIn("postflight", cask)
+            self.assertNotIn("xattr", cask)
+            self.assertNotIn("quarantine", cask)
+            self.assertNotIn("Open Anyway", cask)
 
     def test_release_notes_describe_the_actual_notarization_status(self):
         from publish_homebrew import release_notes

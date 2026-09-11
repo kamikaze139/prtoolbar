@@ -39,9 +39,10 @@ def release_notes(tap: str, *, notarized: bool) -> str:
     status = (
         "Signed with Developer ID and notarized by Apple.\n"
         if notarized else
-        "This build is not notarized by Apple. If macOS blocks the first launch, "
-        "open **System Settings → Privacy & Security → Open Anyway** after "
-        "attempting to open the app.\n"
+        "This build is not notarized by Apple. The cask clears macOS's quarantine "
+        "flag on install, so `brew` users need nothing extra. For the ZIP below, run "
+        "`xattr -dr com.apple.quarantine /Applications/prtoolbar.app` after moving the "
+        "app, or open it and use **System Settings → Privacy & Security → Open Anyway**.\n"
     )
     return (
         "Native macOS menu bar app for GitHub pull requests, reviews and stacks.\n\n"
