@@ -45,6 +45,17 @@ jobs:
             --repository example/homebrew-tap --archive "$archive" \
             --output "$RUNNER_TEMP/prtoolbar.rb"
           brew ruby -e 'require "cask/cask_loader"; c = Cask::CaskLoader.load(File.read(ARGV.fetch(0))); abort "Wrong cask" unless c.token == "prtoolbar" && c.version.to_s == "0.1.0"' "$RUNNER_TEMP/prtoolbar.rb"
+          # Loading a cask only warns about a stanza Homebrew has deprecated, and
+          # the cask reaches users through a tap that never runs this repository's
+          # tests. `brew style` is the check that actually fails on one, so the
+          # cask goes through a throwaway tap to get it: brew refuses to style a
+          # cask that is not in one.
+          brew tap-new example/caskcheck --no-git
+          # tap-new only lays out Formula, and `brew style` quietly inspects
+          # nothing when handed a path, so create Casks and style by token.
+          mkdir -p "$(brew --repository example/caskcheck)/Casks"
+          cp "$RUNNER_TEMP/prtoolbar.rb" "$(brew --repository example/caskcheck)/Casks/prtoolbar.rb"
+          brew style --cask example/caskcheck/prtoolbar
       # The release build is the slowest step in CI (lto = "thin",
       # codegen-units = 1) and macOS runners cost ~10x Linux ones, so it is
       # not worth repeating on every pull request: release.yml builds the

@@ -23,12 +23,16 @@ def render(tag: str, repository: str, archive: Path, *, notarized: bool = False)
     # say so in the caveats: this trades Gatekeeper's check for a working `brew upgrade`.
     # must_succeed: false because a bundle that cannot be stripped (root-owned /Applications)
     # should still install and fall back to Open Anyway, not abort half way through.
+    # postflight_steps, not postflight: Homebrew 6 deprecated the block form, which makes
+    # `brew` warn at install time and raises outright for anyone with HOMEBREW_DEVELOPER set.
+    # Inside a steps block the app is reached through the {{appdir}} token, because only a
+    # step's command is resolved against a base; its args are plain strings.
     quarantine = "" if notarized else (
         "\n"
-        "  postflight do\n"
-        '    system_command "/usr/bin/xattr",\n'
-        '                   args: ["-d", "-r", "com.apple.quarantine", "#{appdir}/prtoolbar.app"],\n'
-        "                   must_succeed: false\n"
+        "  postflight_steps do\n"
+        '    run "/usr/bin/xattr",\n'
+        '        args:         ["-d", "-r", "com.apple.quarantine", "{{appdir}}/prtoolbar.app"],\n'
+        "        must_succeed: false\n"
         "  end\n"
     )
     notice = "" if notarized else (

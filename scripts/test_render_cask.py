@@ -32,10 +32,13 @@ class CaskTests(unittest.TestCase):
             archive = Path(directory) / "prtoolbar-v0.2.0-universal-apple-darwin.zip"
             archive.write_bytes(b"release archive")
             cask = render("v0.2.0", "someone/homebrew-tap", archive)
-            self.assertIn("postflight do", cask)
+            # postflight_steps: Homebrew 6 deprecated the plain postflight block, and a
+            # deprecated stanza raises for anyone running with HOMEBREW_DEVELOPER set.
+            self.assertIn("postflight_steps do", cask)
+            self.assertNotIn("postflight do", cask)
             self.assertIn('"/usr/bin/xattr"', cask)
             self.assertIn('"com.apple.quarantine"', cask)
-            self.assertIn('"#{appdir}/prtoolbar.app"', cask)
+            self.assertIn('"{{appdir}}/prtoolbar.app"', cask)
             self.assertIn("not notarized by Apple", cask)
             # Saying otherwise would send people to a dialog they will never see.
             self.assertNotIn("Open Anyway", cask)
